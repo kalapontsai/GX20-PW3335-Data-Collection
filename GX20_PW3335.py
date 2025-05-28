@@ -278,7 +278,7 @@ class EnergyCalculator:
         results = {}
         
         # 1. 計算K值 (溫度係數)
-        print(f"冷凍室溫度: {freezer_temp}, 冷藏室溫度: {fridge_temp}")
+        #print(f"冷凍室溫度: {freezer_temp}, 冷藏室溫度: {fridge_temp}")
         K = self.calculate_K_value(freezer_temp, fridge_temp)
         #print(f"K值: {K}")
         # 2. 計算等效內容積
@@ -303,7 +303,10 @@ class EnergyCalculator:
         monthly_consumption = round(daily_consumption * 30,1)
         
         # 9. 計算EF值 (能效因子)
-        ef_value = round(equivalent_volume / monthly_consumption,1)
+        if monthly_consumption == 0:
+            ef_value = 0.0
+        else:
+            ef_value = round(equivalent_volume / monthly_consumption,1)
         
         # 9.1 計算現有效率基準百分比和等級
         current_ef_thresholds = self.current_ef_thresholds(energy_allowance, fridge_type)
@@ -326,16 +329,18 @@ class EnergyCalculator:
             'VR(L)': VR,
             '等效內容積(L)': equivalent_volume,
             '冰箱型式': fridge_type,
-            '容許耗用能源基準(L/kWh/月)': energy_allowance,
-            '2027容許耗用能源基準(L/kWh/月)': future_energy_allowance,
-            '耗電量基準(kWh/月)': benchmark_consumption,
-            '2027耗電量基準(kWh/月)': future_benchmark_consumption,
-            '實測月耗電量(kWh/月)': monthly_consumption,
+            '\n----能效相關計算結果----': '',
             'EF值': ef_value,
-            '現有效率基準百分比(%)': current_percent,
-            '現有效率等級': current_grade,
-            '2027新效率基準百分比(%)': future_percent,
-            '2027新效率等級': future_grade
+            '實測月耗電量(kWh/月)': monthly_consumption,
+            '2018年容許耗用能源基準(L/kWh/月)': energy_allowance,
+            '2018年耗電量基準(kWh/月)': benchmark_consumption,
+            '2018年效率等級': current_grade,
+            '2018年一級效率百分比(%)': current_percent,
+            '\n----2027年新能效公式----': '',
+            '2027容許耗用能源基準(L/kWh/月)': future_energy_allowance,
+            '2027年耗電量基準(kWh/月)': future_benchmark_consumption,
+            '2027年效率等級': future_grade,
+            '2027年一級效率百分比(%)': future_percent
         })
         
         return results
@@ -411,16 +416,16 @@ class EnergyCalculator:
             final_percent = round(ef_value / thresholds[0] * 100, 1)
         elif ef_value >= thresholds[1]:
             grade = "2級"
-            final_percent = round(ef_value / thresholds[1] * 100, 1)
+            final_percent = round(ef_value / thresholds[0] * 100, 1)
         elif ef_value >= thresholds[2]:
             grade = "3級"
-            final_percent = round(ef_value / thresholds[2] * 100, 1)
+            final_percent = round(ef_value / thresholds[0] * 100, 1)
         elif ef_value >= thresholds[3]:
             grade = "4級"
-            final_percent = round(ef_value / thresholds[3] * 100, 1)
+            final_percent = round(ef_value / thresholds[0] * 100, 1)
         else :
             grade = "5級"
-            final_percent = round(ef_value / thresholds[3] * 100, 1)
+            final_percent = round(ef_value / thresholds[0] * 100, 1)
         
         return final_percent, grade
     
@@ -434,16 +439,16 @@ class EnergyCalculator:
             final_percent = round(ef_value / thresholds[0] * 100, 1)
         elif ef_value >= thresholds[1]:
             grade = "2級"
-            final_percent = round(ef_value / thresholds[1] * 100, 1)
+            final_percent = round(ef_value / thresholds[0] * 100, 1)
         elif ef_value >= thresholds[2]:
             grade = "3級"
-            final_percent = round(ef_value / thresholds[2] * 100, 1)
+            final_percent = round(ef_value / thresholds[0] * 100, 1)
         elif ef_value >= thresholds[3]:
             grade = "4級"
-            final_percent = round(ef_value / thresholds[3] * 100, 1)
+            final_percent = round(ef_value / thresholds[0] * 100, 1)
         else :
             grade = "5級"
-            final_percent = round(ef_value / thresholds[3] * 100, 1)
+            final_percent = round(ef_value / thresholds[0] * 100, 1)
         
         return final_percent, grade
 
@@ -991,7 +996,10 @@ class App:
                         writer.writerow(header)
 
                     while self.collecting[station_name]:
-                        frequency_var = int(frequency_var)
+                        if Debug_mode:
+                            frequency_var = 1
+                        else:
+                            frequency_var = int(frequency_var)
                         active_ch_list = self.get_enabled_channel(station_name)
                         now = datetime.now()
                         # 將 99.9 轉為 None
@@ -1043,7 +1051,7 @@ class App:
         # X 軸範圍選擇
         x_axis_range_var = tk.StringVar(value="30min")
         x_axis_range_menu = ttk.Combobox(xbar_frame, textvariable=x_axis_range_var, state="readonly", width=6, foreground="black")
-        x_axis_range_menu['values'] = ["30min", "3hrs", "12hrs", "24hrs"]
+        x_axis_range_menu['values'] = ["30min", "3hrs", "12hrs", "24hrs", "ALL"]
         x_axis_range_menu.grid(row=0, column=0, padx=1, pady=5)
         
         # Pause/Resume button
@@ -1054,7 +1062,8 @@ class App:
         # 頻道框架
         channel_frame = ttk.LabelFrame(frame, text="溫度")
         channel_frame.grid(row=1, column=0, columnspan=2, padx=20, pady=5, sticky="nw")
-        channel_labels = {}  # 新增：儲存當前工位的頻道標籤
+        channel_labels = {}  # 儲存當前工位的頻道標籤
+        temp_alias_label = []  # 儲存頻道別名標籤
         for i in range(20):
             # 計算行(row)與列(column)位置
             if i < 10:
@@ -1065,8 +1074,9 @@ class App:
                 col = 3  # 第二列從第4欄開始（0,1,2,3...）
             instant_temp_label = ttk.Label(channel_frame, text=i+1, width=6, relief="solid", anchor="center")
             instant_temp_label.grid(row=row, column=col, padx=5, pady=5)
-            cal_temp_label = ttk.Label(channel_frame, text=i+1, width=3, anchor="center")
-            cal_temp_label.grid(row=row, column=col+1, padx=5, pady=5)
+            channel_alias_label = ttk.Label(channel_frame, text=i+1, width=3, anchor="center")
+            channel_alias_label.grid(row=row, column=col+1, padx=5, pady=5)
+            temp_alias_label.append(channel_alias_label)
             # 用 channel number 當 key
             channel_num = self.gx20_instance.channel_number[station_name][i]
             channel_labels[channel_num] = instant_temp_label
@@ -1125,7 +1135,7 @@ class App:
         
         # Save references
         setattr(self, f"{station_name}_channel_labels", channel_labels)  # 儲存頻道標籤
-
+        setattr(self, f"{station_name}_channel_alias_label", temp_alias_label)  # 儲存頻道別名標籤
         setattr(self, f"{station_name}_figure", figure)
         setattr(self, f"{station_name}_canvas", canvas)
         setattr(self, f"{station_name}_ax_temp", ax_temp)
@@ -1171,7 +1181,21 @@ class App:
         # 取得 active_ch_list
         if active_ch_list is None:
             active_ch_list = self.get_enabled_channel(station_name)
-         
+        # --- 新增：同步更新 plot 頁面的 channel_alias_label ---
+        channel_alias_label = getattr(self, f"{station_name}_channel_alias_label", None)
+        ch_aliases = getattr(self, f"{station_name}_ch_aliases", None)
+        # 取得參數頁的 ch_label
+        channel_check = getattr(self, f"{station_name}_channel_check", None)
+        if channel_alias_label and ch_aliases and channel_check:
+            for i in range(20):
+                # 1. 先複製參數頁 ch_label 的標籤名稱
+                label_text = f"{i+1}"
+                # 2. 若 alias_entry 有值, 以 alias_entry 的內容取代
+                if ch_aliases[i].get():
+                    label_text = ch_aliases[i].get()
+                channel_alias_label[i].config(text=label_text)
+
+
         # 更新圖表
         if figure and ax_temp and ax_power and not self.pause_plot[station_name]:
             # 清除舊數據
@@ -1188,6 +1212,8 @@ class App:
                 time_delta = pd.Timedelta(hours=12)
             elif x_axis_range == "24hrs":
                 time_delta = pd.Timedelta(hours=24)
+            elif x_axis_range == "ALL":
+                time_delta = pd.Timedelta(plot_data[-1][0] - plot_data[0][0])
             else:
                 time_delta = pd.Timedelta(minutes=30)
 
@@ -1215,7 +1241,7 @@ class App:
             # 只顯示啟用的頻道圖例, 若沒設定alias則顯示頻道index
             if active_ch_list:
                 legend = ax_temp.legend(
-                    [f"{index+1}:{alias}" if alias else f"ch{index+1}" for index, alias, _ in active_ch_list],
+                    [f"{alias}" if alias else f"{index+1}" for index, alias, _ in active_ch_list],
                     loc="upper left",
                     prop=self.font_prop)
                 artists.append(legend)
@@ -1258,8 +1284,8 @@ class App:
 
     def toggle_pause_plot(self, station_name):
         # 檢查 plot_data 是否有 10 筆以上，否則停止程序
-        if len(self.plot_data.get(station_name, [])) < 10:
-            self.show_error_dialog("資料不足", "資料筆數不足 10 筆，無法暫停/分析。")
+        if len(self.plot_data.get(station_name, [])) < 2:
+            self.show_error_dialog("資料不足", "資料筆數不足，無法暫停/分析。")
             return
         # 切換暫停/繼續圖表更新，暫停時於X軸起訖加axvline，繼續時隱藏，並可拖曳vline
         pause_button = getattr(self, f"{station_name}_pause_button", None)
@@ -1500,11 +1526,16 @@ class App:
             # 計算 start 和 end 之間的分鐘數
             time_diff = round((end_datetime - start_datetime).total_seconds() / 60, 1)
             #print(f"時間差: {time_diff} 分鐘")
-            # 計算平均值
-            # 只計算非 NaN 欄位的平均值，並過濾掉全部為 NaN 的欄位
-            # 排除 '功率' 和 '累積功率' 欄位
-            temp_cols = [col for col in df.columns if col not in ['功率', '累積功率']]
-            avg_temp = df[temp_cols].loc[:, df[temp_cols].notna().any()].mean().round(1)
+            # 取temps計算平均值avg_temp
+            from typing import Optional
+            avg_temp: list[Optional[float]] = [None] * 20
+            for i in range(20):
+                temp_column = f"Ch{i+1}"
+                if temp_column in df.columns:
+                    avg = round(df[temp_column].mean(), 1) if not df[temp_column].isnull().all() else None
+                    avg_temp[i] = avg
+            #print(f"平均溫度: {avg_temp}")
+
             avg_power = round(df["功率"].mean(), 1)
             #print(f"平均溫度: {avg_temp}")
             #print(f"平均功率: {avg_power}")
@@ -1588,7 +1619,7 @@ class App:
                 #print(f"每日耗電量: {daily_consumption} kWh")
                 # 計算
                 results = ef.calculate(vf, vr, daily_consumption, temp_f, temp_r, fan_type)
-                print(f"能耗計算結果: {results}")
+                #print(f"能耗計算結果: {results}")
             else:
                 results = None
                 print("無耗電量數據,無法計算能耗")
@@ -1598,10 +1629,15 @@ class App:
             if report_text is not None:
                 report_text.delete(1.0, tk.END)  # 清空文字框
                 report_text.insert(tk.END, f"統計範圍：{start_datetime} ~ {end_datetime}\n")
-                # 整理 avg_temp，移除 dtype 行
-                avg_temp_str = "\n".join([f"ch{idx+1}: {val}" for idx, val in enumerate(avg_temp.values)])
-                report_text.insert(tk.END, f"平均溫度:\n{avg_temp_str}\n")
-                report_text.insert(tk.END, f"平均功率: {avg_power:.2f} W\n")
+                report_text.insert(tk.END, f"筆數: {len(df)}\n")
+                report_text.insert(tk.END, f"時間: {time_diff} 分鐘\n")
+                report_text.insert(tk.END, f"平均溫度:\n")
+                for i in range(20):
+                    if avg_temp[i] is not None:
+                        report_text.insert(tk.END, f"Ch{i+1}: {avg_temp[i]:.1f}\n")
+                    else:
+                        report_text.insert(tk.END, f"Ch{i+1}: --\n")
+                report_text.insert(tk.END, f"平均功率: {avg_power} W\n")
                 report_text.insert(tk.END, f"\nON / Off 周期次數：{power_cycles}\n")
                 report_text.insert(tk.END, f"On 的平均時間: {above_avg_time:.1f} 分\n" if above_count > 0 else "P(W) >= 3 的平均時間: 無資料\n")
                 report_text.insert(tk.END, f"Off 的平均時間: {below_avg_time:.1f} 分\n" if below_count > 0 else "P(W) < 3 的平均時間: 無資料\n")
@@ -1614,12 +1650,8 @@ class App:
                         report_text.insert(tk.END, f"{key}: {value}\n")
                 else:
                     report_text.insert(tk.END, "無法計算能耗，請檢查數據\n")
-
-
-
         except Exception as e:
-            print(f"Error in snapshot_report: {e}")
-            log_error(f"Error in snapshot_report: {e}")
+            self.show_error_dialog("錯誤", f"生成報告時發生錯誤: {e}")
             return
 
     def save_results(self, station_name):
@@ -1662,7 +1694,7 @@ if __name__ == "__main__":
         return os.path.join(base_path, relative_path)
     
     now = datetime.now()
-    AppTitle = "SAMPO RD2 Lab Data Collection 1_0"
+    AppTitle = "SAMPO RD2 Lab Data Collection"
     specific_date = datetime(2025, 12, 31)
     if now > specific_date:
         messagebox.showinfo("Info", AppTitle)
