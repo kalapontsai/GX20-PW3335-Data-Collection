@@ -164,7 +164,7 @@ class GX20:
                             for station_name, channels in self.channel_number.items():
                                 if channel in channels:
                                     index = channels.index(channel)
-                                    self.channels_temp[station_name][index] = 99.9
+                                    self.channels_temp[station_name][index] = 999.9
                                     break
                 #print(f"GX20 channels_temp: {self.channels_temp['工位1']}")
         except Exception as e:
@@ -334,13 +334,17 @@ class EnergyCalculator:
             '實測月耗電量(kWh/月)': monthly_consumption,
             '2018年容許耗用能源基準(L/kWh/月)': energy_allowance,
             '2018年耗電量基準(kWh/月)': benchmark_consumption,
-            '2018年效率等級': current_grade,
+            '2018年一級效率EF值': current_ef_thresholds[0],
             '2018年一級效率百分比(%)': current_percent,
+            '2018年效率等級': current_grade,
+
             '\n----2027年新能效公式----': '',
             '2027容許耗用能源基準(L/kWh/月)': future_energy_allowance,
             '2027年耗電量基準(kWh/月)': future_benchmark_consumption,
-            '2027年效率等級': future_grade,
-            '2027年一級效率百分比(%)': future_percent
+            '2027年一級效率EF值': future_ef_thresholds[0],
+            '2027年一級效率百分比(%)': future_percent,
+            '2027年效率等級': future_grade
+
         })
         
         return results
@@ -649,7 +653,7 @@ class App:
                             if channel in self.plot_channel_labels[station_name]:
                                 label = self.plot_channel_labels[station_name][channel]
                                 if label :
-                                    if temp_list[j] != 99.9:
+                                    if temp_list[j] != 999.9:
                                         label.config(text=f"{temp_list[j]}")
                                     else:
                                         label.config(text=f"--")
@@ -1004,7 +1008,7 @@ class App:
                         now = datetime.now()
                         # 將 99.9 轉為 None
                         temp_data = [
-                            None if v == 99.9 else v
+                            None if v == 999.9 else v
                             for v in self.gx20_data_dict[station_name]
                         ]
 
