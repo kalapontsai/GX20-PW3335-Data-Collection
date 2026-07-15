@@ -521,7 +521,7 @@ BOM / 編碼相關的 `Content-Length` 永遠用對應 body 的編碼算，不�
 
 ### 6.5 v8.1.1 引入的 bug（跨工位污染）
 
-**症狀**：大大在 10.32.35.11 開瀏覽器連 OTA 主機看到「工位 1 有改變，但那是工位 4 的，而且也非正確複製」
+**症狀**：大大在 <USER_MACHINE_IP> 開瀏覽器連 OTA 主機看到「工位 1 有改變，但那是工位 4 的，而且也非正確複製」
 
 **根因**（v8.1.1 的副作用）：
 - `storage.js` merge 邏輯：`this.settings.ch_alias = sess.ch_alias`（整個 dict 替換）
@@ -531,7 +531,7 @@ BOM / 編碼相關的 `Content-Length` 永遠用對應 body 的編碼算，不�
 - **等等，那為什麼工位 1 被改了？**
 
 **真正的時序**（debug log 推導）：
-- 大大 OTA 主機的瀏覽器（10.35.32.11）sessionStorage 內存了 E2E 注入的 6 工位別名殘留
+- 大大 OTA 主機的瀏覽器（<OTA_HOST_IP>）sessionStorage 內存了 E2E 注入的 6 工位別名殘留
 - 11:51:27 v8.1.1 部署後大大開瀏覽器 → `_migrateLegacySessionIfNeeded()` 比對 6 工位都 drift → 整包 POST
 - 但 v8.1.1 之前我 E2E 測試 + 直接 curl 模擬本地端時 POST 過 `ch_alias: {工位1: [中文], ..., 工位6: [中文]}`，**這些值在 server 端還在**
 - 11:47:33 我 E2E 後還原 `ch_alias: 6 工位都 Ch01`，server 確實改了
