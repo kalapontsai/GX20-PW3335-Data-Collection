@@ -1,8 +1,20 @@
-# GX20 Web Monitor — 溫度監視網頁版
+# GX20 + PW3335 Web Monitor — 溫度 × 電力監視
 
-> YOKOGAWA GX20 紙記錄器的網頁版溫度監視系統
+> YOKOGAWA GX20（溫度）+ GW Instek PW3335（電力）的網頁版監視系統
 >
-> 6 工位 × 20 接點 = 120 點，每 10 秒取樣一次，**可持續記錄 7 天以上**
+> 6 工位 × 20 接點 = 120 點溫度 + 6 工位 V/I/W 三相電力，每 10 秒取樣一次，**可持續記錄 7 天以上**
+>
+> **v10.1** 改版重點：備註欄 per-station 同步 + 備份 dump alias/note 到 .meta.json
+>
+> **v10** 改版重點：離線瀏覽備份 db 的 `/snapshot` 頁（讀 archive DB 畫圖 + 兩條 x-bar 拖曳 + wheel zoom）
+>
+> **v9** 改版重點：CSV datetime 改 `YYYY/MM/DD HH:MM:SS`（避 Excel 誤判，2026-07-01）
+>
+> **v8.5.1** 改版重點：電力圖 I/W 兩軸對齊（共用 powerMax，Chart.js nice() 不再 round）
+>
+> **v8.1.x** 改版重點：設定跨瀏覽器/跨電腦同步（debounce auto-save + 遠端鎖死設定權限 / 清除權限）
+>
+> **v7** 改版重點：PW3335 電力計整合（6 工位 V/I/W、雙圖表、CSV 補欄）
 >
 > **v6.1** 改版重點：進階計算 — 游標模式（量測狀態，可拖曳 x-bar 計算區間平均/最大/最小）
 >
@@ -22,7 +34,7 @@
 
 1. [專案概述](#1-專案概述)
 2. [與桌面版差異](#2-與桌面版差異)
-3. [v3 / v4 / v5 改版總覽](#3-v3--v4--v5-改版總覽)
+3. [v3 ~ v8 改版總覽](#3-v3--v8-改版總覽)
 4. [系統架構](#4-系統架構)
 5. [技術選型](#5-技術選型)
 6. [資料模型（SQLite Schema）](#6-資料模型sqlite-schema)
@@ -325,7 +337,7 @@ gx20-web-monitor/
 | Debug log | `logging.handlers.RotatingFileHandler` | 單檔 2MB × 5 個備份，自動輪替 |
 | 前端設定暫存 | `sessionStorage`（每分頁獨立）| 同一瀏覽器不同分頁可有不同 UI 狀態 |
 | 前端 UI | 原生 HTML / CSS / 少量 vanilla JS | 單頁/雙頁，無需框架 |
-| 顏色選擇 | 256 色盤（216 web-safe + 40 灰階） | 題目指定 |
+| 顏色選擇 | 256 色盤（216 web-safe + 40 灰階） | 預設 |
 | 主題 | CSS 變數 + `data-theme` 屬性 | 動態切換不需重整 |
 
 ---
@@ -728,6 +740,7 @@ data/
 |---|---|---|
 | `/` | GET | 監看主頁 |
 | `/settings` | GET | 設定頁 |
+| `/snapshot` | GET | **v10** 歷史快照檢視頁（讀 archive DB，需 `?db=` 指向歸檔檔名） |
 | `/favicon.ico` | GET | 內建 ICO |
 
 ### API
@@ -739,15 +752,28 @@ data/
 | `/api/channels` | GET | 6 工位 × 20 接點的 4 碼頻道號 |
 | `/api/history/<station>` | GET | 拉歷史；支援 `?max_points=N` LTTB 降取樣、`?since_minutes=N` |
 | `/api/latest/<station>` | GET | 該站最新一筆 |
-| `/api/connection` | GET | 連線狀態、host/port |
+| `/api/connection` | GET | GX20 連線狀態、host/port |
+| `/api/pw_connection` | GET | **v7** 6 工位 PW3335 連線狀態（`remote` / `connected` / `host` / `last_error` / `last_vip`） |
 | `/api/db_stats` | GET | DB 統計（每工位筆數、時間範圍、retention、歸檔保留份數）|
-| `/api/clear` | POST | **v5**：清除指定工位；body `{"station":"工位5", "archive":true}` |
+| `/api/clear` | POST | **v5**：清除指定工位；body `{"station":"工位5", "archive":true}`。**v8.1.3** 起遠端瀏覽器呼叫會被 403 擋下（本機 `127.0.0.1` / `::1` 才能清） |
 | `/api/archives` | GET | 查歸檔清單（`?station=工位5` 過濾）|
 | `/api/export_csv/<station>` | GET | 匯出 CSV；依 X 軸範圍 + 平均整合為 1 分鐘/筆 |
-| `/api/export_csv/<station>` | GET | 匯出 CSV；依 X 軸範圍 + 平均整合為 1 分鐘/筆 |
+| `/api/snapshot/archives` | GET | **v10** 列出 snapshot 可用 archive DB（含每檔 ts 範圍與大小） |
+| `/api/snapshot/data` | GET | **v10** 讀 archive DB 歷史點給 snapshot 頁（`?db=&station=&since_minutes=&max_points=`） |
+| `/api/snapshot/stats` | GET | **v10** archive DB 每工位筆數 / 時間範圍統計 |
 | `/api/debug` | GET | 讀取 debug 狀態 |
 | `/api/debug` | POST | 切換 debug 狀態（`{"enabled": true/false}`）|
 | `/api/debug/log_tail` | GET | 查 `logs/app.log` 末段（`?lines=N`）|
+
+### Admin（OTA 用，頭帶 `X-OTA-Token`）
+
+| 路徑 | 方法 | 用途 |
+|---|---|---|
+| `/api/admin/status` | GET | OTA 狀態、token 指紋、uptime、watchdog 版本 |
+| `/api/admin/ota` | POST | 推**單檔**（multipart + `target=相對路徑`） |
+| `/api/admin/ota_bundle` | POST | 推**多檔**一次到位（JSON + base64） |
+| `/api/admin/restart` | POST | 觸發自我重啟（body `{"delay_sec":2}`） |
+| `/api/admin/clear_log` | POST | 清空 `logs/app.log` |
 
 ### SocketIO 事件
 
@@ -798,7 +824,7 @@ data/
 
 | 變數 | light | dark |
 |---|---|---|
-| `--bg`（頁面底色）| `#f5f5dc`（題目指定預設）| `#1d2e17` |
+| `--bg`（頁面底色）| `#f5f5dc`（米色預設）| `#1d2e17` |
 | `--surface`（卡片/表格）| `#ffffff` | `#2c4521` |
 | `--surface-2`（輸入框/次要）| `#ecead0` | `#395a2b` |
 | `--text` | `#2a2a1a` | `#eaf2e0` |
@@ -825,7 +851,7 @@ cd "<your-project-dir>"
 pip install -r requirements.txt
 ```
 
-> 執行設備（題目指定非原儲存位置）可以放在本機磁碟任意位置，**不必放 OneDrive**。
+> 執行設備可以放在本機磁碟任意位置，**不必放 OneDrive**。
 > SQLite WAL 模式對單機存取效能最佳。
 
 ### 啟動
@@ -1341,13 +1367,13 @@ MEMORY.md 也記下了「使用者決策偏好」，供未來類似需求參考�
 |--------|------|------|
 | IP 預設 | `192.168.1.{2..7}` (工位1→.2 ... 工位6→.7) | 沿用桌機版 `GX20_PW3335.py` line 884 對應規則 |
 | `remote` 預設 | 全 False | 避免第一次啟動連一堆失敗的 PW3335 |
-| `remote=False` 行為 | 寫 0 值（不是 None） | 依使用者需求 |
+| `remote=False` 行為 | 寫 0 值（不是 None） | 依需求 |
 | 通訊失敗 | 寫 0，標記 disconnected | 連線恢復後下一輪自動重連 |
-| 電力 CSV 欄位 | `V, I, W` | 依使用者需求命名 |
+| 電力 CSV 欄位 | `V, I, W` | 依需求命名 |
 | 電力 CSV 精度 | V 2 / I 3 / W 2 位小數 | 沿用桌機版 |
-| 電力 Y 軸 | 左 I/W 共用、右 V 獨立 | 依使用者需求 |
-| 電力 Y 軸預設 | V(0,230) / I,W(0,250) | 依使用者 2026-06-15 決定 |
-| 電力圖表高度 | 30%（溫度 70%） | 依使用者需求 |
+| 電力 Y 軸 | 左 I/W 共用、右 V 獨立 | 依需求 |
+| 電力 Y 軸預設 | V(0,230) / I,W(0,250) | 依需求 |
+| 電力圖表高度 | 30%（溫度 70%） | 依需求 |
 | 量測模式下電力圖 | 隱藏 | 沿用「輔助 UI 在即時模式才顯示」偏好 |
 | 電力線顏色 | V=黃 / I=青 / W=紅，可改 | 避開溫度 20 色；可設定頁改 |
 | 電力表（右侧小表） | 即時模式顯示讀值；量測模式顯示 平均/最大/最小 | 跟溫度表同行為 |
@@ -1405,3 +1431,36 @@ MEMORY.md 也記下了「使用者決策偏好」，供未來類似需求參考�
 | `static/css/style.css` | v7 | f939bdb | ✅ 本機 commit |
 | `templates/index.html` | v7 | f939bdb | ✅ 本機 commit |
 | `templates/settings.html` | v7 | f939bdb | ✅ 本機 commit |
+
+
+---
+
+## 19d. 現況總覽（2026-07-23 快照）
+
+§19 / §19b / §19c 三節是 **2026-06-15 之前** 的逐節進度。此後到本節更新（2026-07-23）之間共推出 v7 之後 9 個版本，因量大不再逐節搬入 README；本節只列**指標 → CHANGELOG 連結**，細節一律以 [CHANGELOG.md](CHANGELOG.md) 為準。
+
+| 版本 | 時間 | 主題 | 細節 |
+|------|------|------|------|
+| **v8**    | 2026-06-16 | CSV 中文 BOM hotfix + 別名長度上限 20 字 | CHANGELOG §5 |
+| **v8.1**  | 2026-06-16 | 設定跨瀏覽器/跨電腦同步（debounce auto-save） | CHANGELOG §6.3 |
+| **v8.1.1**| 2026-06-16 | 舊瀏覽器 sessionStorage → init 自動同步 server | CHANGELOG §6.4 |
+| **v8.1.2**| 2026-06-16 | 遠端瀏覽器鎖死設定權限（僅 `127.0.0.1` / `::1` 可改） | CHANGELOG §6.6 |
+| **v8.1.3**| 2026-06-16 | `POST /api/clear` 也鎖遠端（不可逆操作一致性） | CHANGELOG §6.10 |
+| **v8.2**  | 2026-06-16 | 溫度與電力 X 軸寬度對齊（afterFit hook + yR 佔位軸） | CHANGELOG §7 |
+| **v8.4 / v8.5 / v8.5.1** | 2026-06-17 | 電力 I/W 軸邊界自動對齊系列（v8.4 + v8.5 共用 powerMax，v8.5.1 powerMax 先 round 到 100 倍數）→ 已全部 revert 回 v8.2 | CHANGELOG §8 |
+| **v9**    | 2026-07-01 | CSV datetime 改 `YYYY/MM/DD HH:MM:SS`（避 Excel 誤判日期） | CHANGELOG §9 |
+| **v10**   | 2026-07-22 | 新增 `/snapshot` 歷史快照檢視頁（讀 archive DB + 兩條 x-bar 拖曳 + wheel zoom） | CHANGELOG §10 |
+| **v10.1** | 2026-07-23 | 備註欄 per-station 同步 + 備份 dump alias/note 到 `.meta.json`，snapshot 讀取時套用 | [CHANGELOG §11](CHANGELOG.md#11-現況進度2026-07-23-備註同步-archive-meta-v101) |
+
+> 所有 v8 之後的子節連結一律看 [CHANGELOG.md](CHANGELOG.md) 目錄，按編號對應即可；子節 anchor 受 GitHub unicode normalization 影響不一致，本表先用「CHANGELOG §X」標號，不掛細 anchor。
+
+### 19d.1 已知方向修正
+
+2026-06-17 v8.4 / v8.5 / v8.5.1 三版連推皆因**圖表軸對齊 "一鍵自動解" 在本環境走不通**被退回，最終回退到 v8.2 使用者手動設 I.max / W.max。**未來接到圖表軸對齊自動解任務時，先問 "手動設值可不可以接受" 再動手**。完整教訓見 MEMORY 條目與 [CHANGELOG §8](CHANGELOG.md)。
+
+### 19d.2 對應本節驗證
+
+- 路由 / API 列表見 §12（**已補完** `/snapshot` 頁、`/api/pw_connection`、`/api/snapshot/*`、`/api/admin/clear_log`）
+- 改版重點見文檔頂部（**已加 v9**，標題已從「GX20 Web Monitor — 溫度監視網頁版」改為「GX20 + PW3335 Web Monitor — 溫度 × 電力監視」）
+- 開發端 → 部署端的 OTA 推送流程見 §18
+- Watch dog / OTA 重啟 SOP 見 CHANGELOG §5（v8 BOM hotfix）內含 2026-06-11 v4.4 的 watch dog 修正
