@@ -1,0 +1,15 @@
+# 強制 Windows batch 檔案用 CRLF 行尾（避免 WSL/Linux 寫出 LF 版被 CMD 解析炸）
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# shell script 保持 LF
+*.sh text eol=lf
+
+# Python / JS / CSS / HTML 用預設 LF（這些不受 Windows/WSL 行尾影響）
+*.py  text eol=lf
+*.js  text eol=lf
+*.css text eol=lf
+*.html text eol=lf
+*.json text eol=lf
+*.md  text eol=lf
+*.pyi text eol=lf
