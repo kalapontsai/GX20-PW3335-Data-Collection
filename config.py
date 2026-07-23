@@ -156,6 +156,8 @@ def default_settings() -> dict:
         # v7：PW3335 電力計
         "pw3335":         default_pw3335(),
         "pw_axis":        default_pw_axis(),
+        # v10.x：備註欄（per-station 字串，上限 20 字，跟 alias 一樣跨瀏覽器同步）
+        "notes":          {s: "" for s in STATIONS},
     }
 
 

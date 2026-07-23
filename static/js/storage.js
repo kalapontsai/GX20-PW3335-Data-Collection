@@ -69,6 +69,7 @@
       chart_x_minutes: sess.chart_x_minutes,
       pw3335:          sess.pw3335,          // v7：PW3335 整體設定
       pw_axis:         sess.pw_axis,         // v7：電力 Y 軸 per-station
+      notes:           sess.notes,           // v10.x：備註欄 per-station
       theme:         sess.theme,
     };
     if (saved === null) {
@@ -216,6 +217,7 @@
         ch_color:       this.settings.ch_color,
         pw3335:         this.settings.pw3335,        // v7：PW3335
         pw_axis:        this.settings.pw_axis,       // v7：電力 Y 軸
+        notes:          this.settings.notes,         // v10.x：備註欄 per-station
         theme:          this.theme,
       };
       const r = await fetch("/api/settings", {
@@ -240,6 +242,7 @@
       this.sess.chart_x_minutes = payload.chart_x_minutes;
       this.sess.pw3335          = payload.pw3335;     // v7
       this.sess.pw_axis         = payload.pw_axis;    // v7
+      this.sess.notes           = payload.notes;      // v10.x
       this.sess.theme          = payload.theme;
       // 記下「已保存的快照」供 dirty 比較
       this.sess._saved = {
@@ -256,6 +259,7 @@
         chart_x_minutes: payload.chart_x_minutes,
         pw3335:          payload.pw3335,           // v7
         pw_axis:         payload.pw_axis,          // v7
+        notes:           payload.notes,            // v10.x
         theme:         payload.theme,
       };
       sessionStorage.setItem(SESSION_KEY, JSON.stringify(this.sess));

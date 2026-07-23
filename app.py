@@ -274,6 +274,19 @@ def load_settings() -> dict:
                     merged[st] = v[st]
             out[k] = merged
 
+    # v10.x：備註欄（per-station 字串，上限 20 字，跟 alias 一樣跨瀏覽器同步）
+    notes_raw = config.from_json(raw.get("notes"), default=defaults["notes"])
+    if isinstance(notes_raw, dict):
+        merged_notes = dict(defaults["notes"])
+        for st in STATIONS:
+            v = notes_raw.get(st)
+            if isinstance(v, str):
+                # 截斷到 20 字（前端 maxlength=20 防線）
+                merged_notes[st] = v[:20]
+            elif v is None:
+                merged_notes[st] = ""
+        out["notes"] = merged_notes
+
     # v7：pw3335 = {port, hosts, remote, colors}
     pw_raw = config.from_json(raw.get("pw3335"), default=defaults["pw3335"])
     if isinstance(pw_raw, dict):
@@ -431,6 +444,16 @@ def save_settings(patch: dict) -> None:
                 if st in STATIONS:
                     existing[st] = val
             storage.set_setting(k, config.to_json(existing))
+        elif k == "notes" and isinstance(v, dict):
+            # v10.x：備註欄（per-station 字串，per-工位覆寫）
+            existing_raw = storage.get_setting("notes")
+            existing = config.from_json(existing_raw, default=config.default_settings()["notes"])
+            if not isinstance(existing, dict):
+                existing = config.default_settings()["notes"]
+            for st, val in v.items():
+                if st in STATIONS and isinstance(val, str):
+                    existing[st] = val[:20]  # 與 load_settings 一致的截斷
+            storage.set_setting("notes", config.to_json(existing))
         else:
             storage.set_setting(k, str(v))
 

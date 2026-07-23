@@ -85,6 +85,22 @@ async function init() {
     switchStation(sel.value);
   });
 
+  // v10.x：備註欄雙向綁定
+  const noteBoxEl = document.getElementById("noteBox");
+  if (noteBoxEl) {
+    // 初次載入（讀 server / session merge 後的值）
+    loadNoteForCurrentStation();
+    // oninput 實時 update（GX20State.update 內有 300ms debounce auto-save）
+    noteBoxEl.addEventListener("input", () => {
+      // 截斷到 20 字（跟 HTML maxlength 一致，貼上可能略過 maxlength）
+      const v = noteBoxEl.value.slice(0, 20);
+      const cur = (GX20State.settings.notes || {})[currentStation] || "";
+      if (cur === v) return;
+      const next = Object.assign({}, GX20State.settings.notes || {}, { [currentStation]: v });
+      GX20State.update("notes", next);
+    });
+  }
+
   document.getElementById("clearBtn").addEventListener("click", async () => {
     // v5：兩段式 confirm
     // 1) 詢問是否歸檔
@@ -186,9 +202,33 @@ function applyRemoteUiLocks() {
   // 跟設定一起鎖遠端，避免按錯連結就把工位資料刪了
   const clearBtn = document.getElementById("clearBtn");
   if (clearBtn) clearBtn.style.display = "none";
+  // v10.x：備註欄跟設定一樣只能本機改（跨瀏覽器可讀但遠端不顯示）
+  const noteBox = document.getElementById("noteBox");
+  if (noteBox) noteBox.style.display = "none";
   for (const id of ["chartXSel", "rateSel", "avgSel"]) {
     const s = document.getElementById(id);
     if (s) s.disabled = true;
+  }
+}
+
+// v10.x：備註欄雙向綁定
+// - 載入：從 GX20State.settings.notes[currentStation] 讀，設到 input.value
+// - 儲存：oninput → 寫回 GX20State.settings.notes[currentStation] → update("notes", ...)
+// - 切工位：switchStation() 開頭存目前工位，結尾載新工位
+function loadNoteForCurrentStation() {
+  const box = document.getElementById("noteBox");
+  if (!box) return;
+  const notes = (GX20State.settings && GX20State.settings.notes) || {};
+  const v = notes[currentStation];
+  box.value = (typeof v === "string") ? v : "";
+}
+function saveNoteForStation(stationKey) {
+  const box = document.getElementById("noteBox");
+  if (!box || !GX20State.settings) return;
+  const notes = GX20State.settings.notes || {};
+  if (notes[stationKey] !== box.value) {
+    const next = Object.assign({}, notes, { [stationKey]: box.value.slice(0, 20) });
+    GX20State.update("notes", next);
   }
 }
 
@@ -332,6 +372,8 @@ function initReadoutControls(settings) {
  * 用 loadGen 確保非同步結果不會錯放到別的站位。
  */
 async function switchStation(newStation) {
+  // v10.x：備註欄切工位前先存現在的（避免覆寫別工位）
+  saveNoteForStation(currentStation);
   currentStation = newStation;
   loadGen += 1;            // 中斷所有進行中的 loadHistory / onNewSample
   const myGen = loadGen;
@@ -340,6 +382,8 @@ async function switchStation(newStation) {
   // 先清空右側表格並重畫 chart（避免殘留上一站資料的視覺）
   updateReadoutTable(null);
   updatePowerReadout(null);
+  // v10.x：備註欄載新工位的備註（上面 saveNoteForStation 已存舊的）
+  loadNoteForCurrentStation();
   rebuildChart();
   rebuildPowerChart();
   // v8.2：rAF 雙重保險對齊（解決「溫度先建 / 電力先建」順序差異）
