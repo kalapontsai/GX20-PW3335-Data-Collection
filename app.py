@@ -733,6 +733,18 @@ def index():
     )
 
 
+@app.route("/snapshot")
+def snapshot_page():
+    """v10: 離線瀏覽備份 db 的頁面。
+    注意：本頁面不與即時頁 / 共用任何前端狀態，URL 直接進入。
+    """
+    return render_template(
+        "snapshot.html",
+        stations=STATIONS,
+        points_per_station=POINTS_PER_STATION,
+    )
+
+
 @app.route("/settings")
 def settings_page():
     return render_template(
@@ -1021,6 +1033,137 @@ def api_archives():
         "archives": archives,
         "count": len(archives),
         "keep_per_station": storage.ARCHIVE_KEEP_PER_STATION,
+    })
+
+
+# ---------- v10：snapshot viewer ----------
+
+@app.route("/api/snapshot/archives", methods=["GET"])
+def api_snapshot_archives():
+    """
+    列出所有備份 db 的詳細資訊（包含每個檔案的 ts_min / ts_max / count）。
+    跟 /api/archives 類似，但每個項目多帶從 DB 內容讀出的時間範圍與筆數。
+
+    Query:
+      ?station=工位4   只列該工位；不帶 → 列全部
+    """
+    s = request.args.get("station")
+    if s and s not in STATIONS:
+        return jsonify({"ok": False, "error": "unknown station"}), 404
+    archives = storage.list_archives_with_meta(station=s)
+    return jsonify({
+        "ok": True,
+        "archives": archives,
+        "count": len(archives),
+        "keep_per_station": storage.ARCHIVE_KEEP_PER_STATION,
+    })
+
+
+@app.route("/api/snapshot/data", methods=["GET"])
+def api_snapshot_data():
+    """
+    讀取指定備份 db 的內容（畫圖用）。
+    Query:
+      ?filename=gx20_工位4_20260721_225843.db   （必填，會經白名單 regex 驗證）
+      ?max_points=N                              （預設 2000，超過會 LTTB 降取樣）
+      ?ts_min=2026-07-21T22:00:00                （可選）
+      ?ts_max=2026-07-21T23:00:00                （可選）
+
+    注意：
+      - filename 必須通過 storage.validate_archive_filename() 白名單
+      - 走 LTTB 是為了「畫面順暢」；統計要走 /api/snapshot/stats 才不失真
+      - 讀不下 / 檔案不存在 → 4xx + 錯誤訊息
+    """
+    fn = request.args.get("filename", "").strip()
+    if not fn:
+        return jsonify({"ok": False, "error": "MISSING_FILENAME",
+                        "message": "filename query param 必填"}), 400
+    if storage.validate_archive_filename(fn) is None:
+        return jsonify({"ok": False, "error": "INVALID_FILENAME",
+                        "message": "filename 不符合白名單格式"}), 400
+
+    # max_points 預設沿用 config.DEFAULT_MAX_POINTS
+    try:
+        max_points = int(request.args.get("max_points", config.DEFAULT_MAX_POINTS))
+    except (TypeError, ValueError):
+        max_points = config.DEFAULT_MAX_POINTS
+
+    ts_min = request.args.get("ts_min") or None
+    ts_max = request.args.get("ts_max") or None
+
+    try:
+        rows = storage.query_archive_range(fn, ts_min=ts_min, ts_max=ts_max)
+    except FileNotFoundError:
+        return jsonify({"ok": False, "error": "NOT_FOUND",
+                        "message": f"找不到備份檔 {fn}"}), 404
+    except ValueError as e:
+        return jsonify({"ok": False, "error": "INVALID_FILENAME",
+                        "message": str(e)}), 400
+
+    original_count = len(rows)
+    downsampled = False
+    if max_points > 0 and original_count > max_points:
+        rows = downsample_rows(
+            rows,
+            ts_key="ts",
+            point_keys=[f"t{i:02d}" for i in range(1, 21)],
+            threshold=max_points,
+        )
+        downsampled = True
+
+    return jsonify({
+        "ok": True,
+        "filename": fn,
+        "rows": rows,
+        "count": len(rows),
+        "original_count": original_count,
+        "downsampled": downsampled,
+        "max_points": max_points,
+        "ts_min": ts_min,
+        "ts_max": ts_max,
+    })
+
+
+@app.route("/api/snapshot/stats", methods=["GET"])
+def api_snapshot_stats():
+    """
+    對指定備份 db 在 [ts_min, ts_max] 區間內，計算每個欄位的 avg/min/max/count。
+    走 SQLite 原始資料，不經 LTTB → 不失真。
+
+    Query:
+      ?filename=gx20_工位4_20260721_225843.db   （必填）
+      ?ts_min=2026-07-21T22:00:00                （必填）
+      ?ts_max=2026-07-21T23:00:00                （必填）
+    """
+    fn = request.args.get("filename", "").strip()
+    ts_min = request.args.get("ts_min", "").strip()
+    ts_max = request.args.get("ts_max", "").strip()
+
+    if not fn:
+        return jsonify({"ok": False, "error": "MISSING_FILENAME",
+                        "message": "filename 必填"}), 400
+    if storage.validate_archive_filename(fn) is None:
+        return jsonify({"ok": False, "error": "INVALID_FILENAME",
+                        "message": "filename 不符合白名單格式"}), 400
+    if not ts_min or not ts_max:
+        return jsonify({"ok": False, "error": "MISSING_TS",
+                        "message": "ts_min 與 ts_max 必填"}), 400
+
+    try:
+        stats = storage.compute_archive_stats(fn, ts_min, ts_max)
+    except FileNotFoundError:
+        return jsonify({"ok": False, "error": "NOT_FOUND",
+                        "message": f"找不到備份檔 {fn}"}), 404
+    except ValueError as e:
+        return jsonify({"ok": False, "error": "INVALID_FILENAME",
+                        "message": str(e)}), 400
+
+    return jsonify({
+        "ok": True,
+        "filename": fn,
+        "ts_min": ts_min,
+        "ts_max": ts_max,
+        "stats": stats,
     })
 
 

@@ -30,7 +30,7 @@ import shutil
 import sqlite3
 import logging
 from contextlib import contextmanager
-from typing import Dict, List, Optional, Any, Iterator
+from typing import Dict, List, Optional, Any, Iterator, Tuple
 from datetime import datetime, timedelta
 
 log = logging.getLogger("storage")
@@ -544,6 +544,214 @@ def sample_time_range(station: str) -> Optional[Dict[str, str]]:
     if not r or r["mn"] is None:
         return None
     return {"first": r["mn"], "last": r["mx"]}
+
+
+# === v10：snapshot viewer（離線瀏覽備份 db）===
+
+# 嚴格的 archive 檔名白名單
+# 檔名格式：gx20_<station>_YYYYMMDD_HHMMSS.db
+# station 允許中英文數字（避免 path traversal），長度 1~32
+ARCHIVE_FILENAME_RE = re.compile(r"^gx20_([\w\u4e00-\u9fff]{1,32})_(\d{8})_(\d{6})\.db$")
+
+
+def validate_archive_filename(filename: str) -> Optional[Tuple[str, str]]:
+    """
+    驗證使用者傳入的 archive 檔名是否符合白名單格式。
+    回傳 (station, ts_suffix) 給呼叫端組合路徑用；
+    不合法回傳 None。
+    注意：只驗證檔名，不檢查實際檔案存在與否。
+    """
+    if not filename or not isinstance(filename, str):
+        return None
+    # 防 path traversal：拒絕 / \ .. 等
+    if "/" in filename or "\\" in filename or ".." in filename:
+        return None
+    m = ARCHIVE_FILENAME_RE.match(filename)
+    if not m:
+        return None
+    return (m.group(1), m.group(2) + "_" + m.group(3))
+
+
+def archive_meta(filename: str) -> Optional[Dict[str, Any]]:
+    """
+    從歸檔檔名 + DB 內容算出 metadata：
+      station, filename, ts_min, ts_max, count, size, mtime
+    若檔案不存在或檔名不合法，回傳 None。
+    """
+    parsed = validate_archive_filename(filename)
+    if not parsed:
+        return None
+    station, _ts_suffix = parsed
+    path = os.path.join(ARCHIVE_DIR, filename)
+    if not os.path.exists(path):
+        return None
+    try:
+        st = os.stat(path)
+    except OSError:
+        return None
+    # 開啟 archive DB（唯讀）
+    try:
+        c = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=5)
+        c.row_factory = sqlite3.Row
+        # 確保 samples 表存在
+        tables = {r[0] for r in c.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall()}
+        if "samples" not in tables:
+            c.close()
+            return None
+        r = c.execute("SELECT COUNT(*) AS n, MIN(ts) AS mn, MAX(ts) AS mx FROM samples").fetchone()
+        c.close()
+    except sqlite3.Error:
+        return None
+    if not r or r["mn"] is None:
+        # 歸檔檔存在但裡面沒資料（清空後歸檔的情況）
+        return {
+            "station":  station,
+            "filename": filename,
+            "ts_min":   None,
+            "ts_max":   None,
+            "count":    0,
+            "size":     st.st_size,
+            "mtime":    datetime.fromtimestamp(st.st_mtime).isoformat(timespec="seconds"),
+        }
+    return {
+        "station":  station,
+        "filename": filename,
+        "ts_min":   r["mn"],
+        "ts_max":   r["mx"],
+        "count":    r["n"],
+        "size":     st.st_size,
+        "mtime":    datetime.fromtimestamp(st.st_mtime).isoformat(timespec="seconds"),
+    }
+
+
+def list_archives_with_meta(station: Optional[str] = None) -> List[Dict[str, Any]]:
+    """
+    跟 list_archives() 一樣列歸檔清單，但每個檔案多帶 ts_min / ts_max / count。
+    對 archive 數量少（≤ 5 per station）的場景，讀檔成本可接受。
+    """
+    items = list_archives(station=station)
+    out: List[Dict[str, Any]] = []
+    for it in items:
+        meta = archive_meta(it["filename"])
+        if meta is None:
+            # 檔案剛被刪掉或檔名毀損：跳過
+            continue
+        # 合併 it 的基本欄位（路徑、檔名）與 meta（DB 內容）
+        out.append({
+            "station":  meta["station"],
+            "filename": meta["filename"],
+            "path":     it["path"],
+            "size":     meta["size"],
+            "mtime":    meta["mtime"],
+            "ts_min":   meta["ts_min"],
+            "ts_max":   meta["ts_max"],
+            "count":    meta["count"],
+        })
+    return out
+
+
+def query_archive_range(filename: str, ts_min: Optional[str] = None, ts_max: Optional[str] = None) -> List[Dict[str, Any]]:
+    """
+    從歸檔 db 讀取指定時間區間的 samples（無區間 → 全讀）。
+    回傳格式跟 query_recent() 一致（list of dict, 每 dict 含 ts + station + t01..t20 + v/i/w）。
+
+    注意：
+      - 只讀 archive DB（不影響 live DB）
+      - 用 mode=ro 開啟，避免意外寫入
+      - 區間邊界用 ISO 字串比對（SQLite TEXT 比較 OK，因為 ISO 8601 字典序 == 時間序）
+    """
+    parsed = validate_archive_filename(filename)
+    if not parsed:
+        raise ValueError(f"invalid archive filename: {filename!r}")
+    station, _ts_suffix = parsed
+    path = os.path.join(ARCHIVE_DIR, filename)
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"archive not found: {filename}")
+    # 建 WHERE 條件
+    clauses = []
+    params: List[Any] = []
+    if ts_min:
+        clauses.append("ts >= ?")
+        params.append(ts_min)
+    if ts_max:
+        clauses.append("ts <= ?")
+        params.append(ts_max)
+    where_sql = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+
+    c = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=5)
+    c.row_factory = sqlite3.Row
+    try:
+        rows = c.execute(
+            f"SELECT * FROM samples{where_sql} ORDER BY ts ASC",
+            tuple(params),
+        ).fetchall()
+    finally:
+        c.close()
+
+    # 用 _row_to_dict 統一格式（station 用檔名解出來的，不是 row 內的 station 欄）
+    return [_row_to_dict(r, station) for r in rows]
+
+
+def compute_archive_stats(filename: str, ts_min: str, ts_max: str) -> Dict[str, Dict[str, Any]]:
+    """
+    對歸檔 db 在 [ts_min, ts_max] 區間內，跑 SQLite 原始計算：
+      對每個欄位（t01..t20, v, i, w）回傳 {count, avg, min, max}。
+
+    注意：
+      - 用 SUM/COUNT/MIN/MAX 等聚合，**完全跑原始資料**，不經 LTTB
+      - NULL 值自動跳過（AVG 的分母 = 非 NULL 筆數）
+      - count = 0 的欄位回傳 None（避免除以 0）
+    """
+    parsed = validate_archive_filename(filename)
+    if not parsed:
+        raise ValueError(f"invalid archive filename: {filename!r}")
+    path = os.path.join(ARCHIVE_DIR, filename)
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"archive not found: {filename}")
+
+    # 動態組 SQL：對每個欄位算一次
+    fields: List[str] = [f"t{i:02d}" for i in range(1, 21)] + list(SAMPLE_PW_COLUMN_NAMES)
+    select_parts: List[str] = []
+    for f in fields:
+        select_parts.append(
+            f"SUM(CASE WHEN {f} IS NULL THEN 0 ELSE 1 END) AS cnt_{f},"
+            f"AVG({f}) AS avg_{f},"
+            f"MIN({f}) AS min_{f},"
+            f"MAX({f}) AS max_{f}"
+        )
+    sql = (
+        "SELECT " + ", ".join(select_parts) +
+        " FROM samples WHERE ts >= ? AND ts <= ?"
+    )
+
+    c = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=5)
+    c.row_factory = sqlite3.Row
+    try:
+        r = c.execute(sql, (ts_min, ts_max)).fetchone()
+    finally:
+        c.close()
+
+    out: Dict[str, Dict[str, Any]] = {}
+    if r is None:
+        # 區間內完全沒有資料 → 全欄位 None
+        for f in fields:
+            out[f] = {"count": 0, "avg": None, "min": None, "max": None}
+        return out
+    for f in fields:
+        cnt = r[f"cnt_{f}"] or 0
+        avg = r[f"avg_{f}"]
+        mn  = r[f"min_{f}"]
+        mx  = r[f"max_{f}"]
+        out[f] = {
+            "count": int(cnt),
+            # SQLite AVG 回 float；Python 端不轉 Decimal，統計用途精準度足夠
+            "avg": float(avg) if avg is not None else None,
+            "min": float(mn) if mn is not None else None,
+            "max": float(mx) if mx is not None else None,
+        }
+    return out
 
 
 if __name__ == "__main__":

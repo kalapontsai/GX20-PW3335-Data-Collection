@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
+<title>GX20 快照瀏覽</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=10">
+<script src="{{ url_for('static', filename='vendor/chart.umd.min.js') }}"></script>
+<script src="{{ url_for('static', filename='vendor/chartjs-adapter-date-fns.bundle.min.js') }}"></script>
+</head>
+<body data-theme="light">
+
+<header class="topbar">
+  <span class="brand">GX20 快照瀏覽</span>
+  <label>站點：
+    <select id="stationSelect">
+      {% for s in stations %}<option value="{{ s }}">{{ s }}</option>{% endfor %}
+    </select>
+  </label>
+  <label>備份檔：
+    <select id="archiveSelect" disabled>
+      <option value="">（先選站點）</option>
+    </select>
+  </label>
+  <button id="loadBtn" class="btn" disabled title="讀取選定的備份檔">載入</button>
+  <button id="themeBtn" class="btn" title="切換明亮/暗黑">☀/🌙</button>
+  <a href="/" class="btn" title="回到即時監控頁">← 即時頁</a>
+  <span class="conn">
+    <span id="statusBadge" class="status-badge">就緒</span>
+  </span>
+</header>
+
+<main class="snapshot-main">
+  <section class="chart-area">
+    <div class="chart-pane chart-temp snapshot-chart">
+      <canvas id="chart"></canvas>
+      <!-- 游標模式 overlay：兩條 X-line + 區間 highlight -->
+      <div id="cursorOverlay" class="cursor-overlay" aria-hidden="true">
+        <div id="cursorRange" class="cursor-range" hidden></div>
+        <div id="cursorLeft"  class="cursor-bar cursor-left"  data-side="left"  hidden>
+          <span class="cursor-time" id="cursorLeftTime"></span>
+        </div>
+        <div id="cursorRight" class="cursor-bar cursor-right" data-side="right" hidden>
+          <span class="cursor-time" id="cursorRightTime"></span>
+        </div>
+      </div>
+    </div>
+    <div class="snapshot-zoom-hint">
+      提示：滾輪以游標位置為中心放大/縮小 · 拖曳圖表空白處平移 · 雙擊游標線重置位置
+    </div>
+  </section>
+
+  <aside class="readout snapshot-readout">
+    <div class="readout-header">
+      <h3>📊 區間統計</h3>
+      <button id="resetCursorBtn" class="btn btn-sm" title="重置游標到圖表 25% / 75% 位置">重置游標</button>
+    </div>
+
+    <!-- 區間資訊列 -->
+    <div id="cursorInfo" class="cursor-info" hidden>
+      <div class="cursor-info-row">
+        <span class="cursor-info-label">區間：</span>
+        <span id="cursorInfoRange">—</span>
+      </div>
+    </div>
+
+    <!-- v10 snapshot：曲線顯示控制 checkbox（沿用既有 legend 行為，再加一個 checkbox 入口） -->
+    <div class="readout-header" style="margin-top:8px;">
+      <h3>🔘 曲線顯示控制</h3>
+      <button id="allOnBtn"  class="btn btn-sm">全選</button>
+      <button id="allOffBtn" class="btn btn-sm">全消</button>
+    </div>
+    <div id="curveCheckboxes" class="snapshot-checkboxes">
+      <!-- JS 動態生成：20 條溫度線 + 3 條電力線 -->
+    </div>
+
+    <!-- 統計表：兩條 X-line 之間的值（基本款：樣本數 / 平均 / 最大 / 最小） -->
+    <div class="readout-header" style="margin-top:12px;">
+      <h3>統計結果</h3>
+    </div>
+    <table id="statsTable" class="stats-table">
+      <thead>
+        <tr>
+          <th>欄位</th>
+          <th>樣本數</th>
+          <th>平均</th>
+          <th>最大</th>
+          <th>最小</th>
+        </tr>
+      </thead>
+      <tbody>
+        <!-- JS 動態生成 -->
+      </tbody>
+    </table>
+  </aside>
+</main>
+
+<!-- 載入既有模組（lttb 提供 window.lttb） -->
+<script src="{{ url_for('static', filename='js/lttb.js') }}?v=10"></script>
+<script src="{{ url_for('static', filename='js/snapshot.js') }}?v=10"></script>
+</body>
+</html>

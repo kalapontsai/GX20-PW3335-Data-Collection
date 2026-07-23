@@ -29,11 +29,14 @@ data/
 *.db-shm
 *.log
 nohup.out
-logs/                       # debug logger 輸出
-data/archive/               # v5 歸檔（可能有使用者資料）
+logs/
+data/archive/
 
-# Local config overrides
+# Local config overrides（保留 settings.example.json；settings.json 含使用者實際值）
 .env
-config/settings.json        # 使用者實際設定（可能含個資別名）；保留 settings.example.json
-config/ota_token            # OTA 認證 token（絕不進版控；部署端各自產生）
-config/ota_backup/          # OTA 寫入前的備份（不必進版控）
+config/settings.json
+config/ota_token
+config/ota_backup/
+
+# OTA 推送暫存 manifest（本機一次性，不進版控）
+ota_manifest_*.json

@@ -598,3 +598,115 @@ body.cursor-mode .chart-temp { flex: 1 1 0; }
   font-size: 13px;
   color: var(--text-dim);
 }
+
+/* === v10：snapshot viewer 專屬樣式 === */
+
+.snapshot-main {
+  display: flex;
+  flex-direction: row;
+  height: calc(100vh - 56px);  /* topbar 大約 56px */
+  overflow: hidden;
+}
+.snapshot-main .chart-area {
+  flex: 7 1 0;
+  display: flex;
+  flex-direction: column;
+  padding: 8px;
+  min-width: 0;
+}
+.snapshot-chart {
+  flex: 1 1 0;
+  position: relative;
+  min-height: 320px;
+}
+.snapshot-zoom-hint {
+  font-size: 11px;
+  color: var(--text-mute);
+  padding: 4px 8px;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+.snapshot-readout {
+  flex: 3 1 320px;
+  min-width: 320px;
+  max-width: 480px;
+  border-left: 1px solid var(--border);
+  padding: 12px;
+  overflow-y: auto;
+}
+
+.snapshot-checkboxes {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px 8px;
+  font-size: 12px;
+  margin: 6px 0;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 6px 8px;
+}
+.snapshot-cb {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  user-select: none;
+}
+.snapshot-cb-label {
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  border: 1px solid rgba(0,0,0,0.15);
+}
+
+.stats-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  margin-top: 4px;
+}
+.stats-table thead th {
+  background: var(--table-head);
+  border-bottom: 1px solid var(--border);
+  padding: 4px 6px;
+  text-align: left;
+  color: var(--text-dim);
+  font-weight: 600;
+}
+.stats-table tbody td {
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+}
+.stats-table tbody td.num {
+  text-align: right;
+}
+
+.btn-sm {
+  padding: 2px 8px;
+  font-size: 11px;
+  border-radius: 3px;
+}
+
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.status-badge.ok  { background: var(--primary); color: var(--primary-fg); border-color: var(--primary); }
+.status-badge.err { background: var(--danger);  color: #fff;              border-color: var(--danger); }
+.status-badge.warn{ background: var(--accent);  color: #2a2a1a;          border-color: var(--accent); }
+
+/* snapshot 頁面不需要電力圖 70/30 切分，沿用 .chart-temp 即可 */

@@ -1,6 +1,6 @@
 # GX20 Web Monitor — 版本演進與現況
 
-> 大版本快照 + 重要 bug 修復 + 現況進度（最後更新：2026-06-16）
+> 大版本快照 + 重要 bug 修復 + 現況進度（最後更新：2026-07-22）
 >
 > 程式架構見 [ARCHITECTURE.md](ARCHITECTURE.md)；使用者操作見 [README.md](README.md)。
 
@@ -853,3 +853,51 @@ W 線 0~200 佔 W 軸 90.91%
 - CSV 格式選擇：當下游可能有 Excel 時，**4 位數年份 + 24h** 是最不會誤判的格式
 - 「改了 CSV 字串」≠「改了資料結構」，這次只是輸出格式化，所以可以放膽改
 - 「BOM + 逗號分隔」對 Excel 已經是最好的「別誤判」策略，但 datetime 欄位本身還是要選不易混淆的格式
+
+---
+
+## 10. 現況進度（2026-07-22 snapshot viewer v10）
+
+### 10.1 v10 — 新增離線瀏覽備份 db 的頁面
+
+**動機（大大需求 2026-07-22 20:22）**：
+
+即時頁 `/` 只保留 ring buffer 的資料（最近約 2 小時）。手動清除工位時雖然會備份到 `data/archive/`，但缺少「讀回來瀏覽」的入口。
+
+**功能**：
+
+1. 新頁 `/snapshot`：列出備份清單，選一個載入後繪成圖表
+2. 曲線可放大 / 縮小（wheel zoom，無 plugin 依賴）
+3. 特定曲線可顯示 / 隱藏（Chart.js dataset.hidden + checkbox panel）
+4. 兩條 X-line（沿用 `docs/CURSOR_MODE.md` 設計）拖曳 → 區間統計
+5. **統計走 SQLite 原始資料**（`/api/snapshot/stats`），畫面層才用 LTTB 降取樣
+
+**架構決策**：
+
+| 決策 | 理由 |
+|---|---|
+| 不切新 branch | 大大決策 2026-07-22 20:42：直接在 `web_UI` 上加檔案 |
+| 不改 `index.html` / `settings.html` / 既有 route | 維持即時頁穩定；使用者直接打 `/snapshot` URL |
+| 不引進 `chartjs-plugin-zoom` / `chartjs-plugin-annotation` | 自己寫 wheel zoom（~30 行）；兩條 X-line 用 CSS overlay 沿用既有 `.cursor-bar` |
+| 統計走後端 `/api/snapshot/stats` | 確保「實際數據計算不失真」（符合大大需求 #6）|
+| 路徑 traversal 防護 | `filename` 必須通過 `ARCHIVE_FILENAME_RE` 白名單 + 拒絕 `/`、`\`、`..` |
+
+**新增檔案**：
+
+- `templates/snapshot.html`
+- `static/js/snapshot.js`
+- `tests/test_snapshot.py`（20 個測試：白名單、攻擊防護、SQLite 統計、API endpoint）
+- `docs/specs/snapshot-viewer.md`
+
+**修改檔案**：
+
+- `storage.py` — 新增 5 個函式（`validate_archive_filename` / `archive_meta` / `list_archives_with_meta` / `query_archive_range` / `compute_archive_stats`）。既有函式**零修改**
+- `app.py` — 新增 4 個 route（`/snapshot` + `/api/snapshot/{archives,data,stats}`）。既有 route **零修改**
+- `static/css/style.css` — 補 `.snapshot-*` 區塊（既有 class 不動）
+
+**驗證**：
+
+- pytest `tests/test_snapshot.py`：20 passed（含路徑 traversal 攻擊 5 個 case + URL-encoded attack）
+- 本機 Flask 起 server：`GET /` / `/settings` / `/snapshot` 都 200；既有路由未受影響
+- 攻擊測試：`?filename=../../etc/passwd` 回 400；`?filename=..%2F..%2Fetc%2Fpasswd` 回 400
+- OTA 端（`<OTA_HOST>:5000`）實機驗收：大大手動確認三條需求通過後才 commit
