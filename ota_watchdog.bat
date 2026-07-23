@@ -1,10 +1,14 @@
 @echo off
 REM ============================================================
-REM  ota_watchdog.bat (v2 - hardened)
+REM  ota_watchdog.bat (v2.1 - pythonw + hardened)
 REM
 REM  Purpose:
-REM    Wrap "python app.py" so Flask is auto-restarted on crash
+REM    Wrap "pythonw app.py" so Flask is auto-restarted on crash
 REM    or after an OTA-triggered self-restart.
+REM
+REM  Improvements over v2:
+REM    - 使用 pythonw.exe（無 console 視窗）取代 python.exe
+REM    - 其他跟 v2 一樣（自動偵測 python、寫 log、5 次失敗暫停）
 REM
 REM  Improvements over v1:
 REM    - Auto-detect Python absolute path (don't rely on PATH)
@@ -13,8 +17,9 @@ REM    - Color-coded exit code (user can tell crash vs OTA restart)
 REM    - Detect port already-bound (avoid two Flask instances)
 REM    - Test python executable works before LOOP
 REM
-REM  Usage (replaces direct "python app.py"):
+REM  Usage (replaces direct "pythonw app.py"):
 REM    ota_watchdog.bat
+REM    或 start_forever.bat（背景跑 / 關視窗不殺 watchdog）
 REM ============================================================
 
 REM Force UTF-8 codepage
@@ -27,24 +32,39 @@ REM Setup log dir
 if not exist logs mkdir logs
 set LOGFILE=logs\watchdog.log
 
-REM ----- Find Python (auto-detect) -----
+REM ----- Find Python (auto-detect, prefer pythonw.exe) -----
 set PYTHON=
-where python >nul 2>&1
+REM Step 1: 先找 pythonw.exe（無 console 視窗，推薦）
+where pythonw >nul 2>&1
 if %ERRORLEVEL% EQU 0 (
-    for /f "delims=" %%P in ('where python') do (
+    for /f "delims=" %%P in ('where pythonw') do (
         if not defined PYTHON set PYTHON=%%P
     )
 )
 
+REM Step 2: 找不到 pythonw 才 fallback python.exe
 if not defined PYTHON (
-    REM Try common Windows install locations
+    where python >nul 2>&1
+    if %ERRORLEVEL% EQU 0 (
+        for /f "delims=" %%P in ('where python') do (
+            if not defined PYTHON set PYTHON=%%P
+        )
+    )
+)
+
+if not defined PYTHON (
+    REM Step 3: 最後 fallback 常見安裝位置
     for %%P in (
+        "C:\Python313\pythonw.exe"
+        "C:\Python312\pythonw.exe"
+        "C:\Python311\pythonw.exe"
+        "C:\Python310\pythonw.exe"
+        "C:\Program Files\Python313\pythonw.exe"
+        "C:\Program Files\Python312\pythonw.exe"
         "C:\Python313\python.exe"
         "C:\Python312\python.exe"
         "C:\Python311\python.exe"
         "C:\Python310\python.exe"
-        "C:\Program Files\Python313\python.exe"
-        "C:\Program Files\Python312\python.exe"
     ) do (
         if exist %%P (
             set PYTHON=%%~P
@@ -78,13 +98,13 @@ set MAX_FAILS=5
 set FAIL_COUNT=0
 
 :LOOP
-echo [%date% %time%] [INFO] Watch dog: starting python app.py ...
-echo [%date% %time%] [INFO] Watch dog: starting python app.py ... >> %LOGFILE%
+echo [%date% %time%] [INFO] Watch dog: starting %PYTHON% app.py ...
+echo [%date% %time%] [INFO] Watch dog: starting %PYTHON% app.py ... >> %LOGFILE%
 
 %PYTHON% app.py
 set EXITCODE=%ERRORLEVEL%
-echo [%date% %time%] [INFO] python app.py exited, code=%EXITCODE%
-echo [%date% %time%] [INFO] python app.py exited, code=%EXITCODE% >> %LOGFILE%
+echo [%date% %time%] [INFO] %PYTHON% app.py exited, code=%EXITCODE%
+echo [%date% %time%] [INFO] %PYTHON% app.py exited, code=%EXITCODE% >> %LOGFILE%
 
 REM code 0  = normal exit (OTA self-restart)
 REM code !=0 = abnormal crash
