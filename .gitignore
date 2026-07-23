@@ -40,3 +40,11 @@ config/ota_backup/
 
 # OTA 推送暫存 manifest（本機一次性，不進版控）
 ota_manifest_*.json
+
+# 本機驗收產物（smoke test screenshots）
+screenshots/
+
+# Smoke test 產生的 SQLite / 暫存檔（這些 *.db 本來就被 *.db rule 蓋掉，下面明確記上）
+# playwright 預設產出位置
+test-results/
+playwright-report/

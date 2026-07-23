@@ -22,6 +22,7 @@
   const themeBtn       = document.getElementById("themeBtn");
   const statusBadge    = document.getElementById("statusBadge");
   const canvas         = document.getElementById("chart");
+  const pwCanvas       = document.getElementById("pwChart");
   const cursorOverlay  = document.getElementById("cursorOverlay");
   const cursorRange    = document.getElementById("cursorRange");
   const cursorLeft     = document.getElementById("cursorLeft");
@@ -41,7 +42,8 @@
     station:       null,
     archiveFilename: null,
     rawRows:       [],   // 從 /api/snapshot/data 拿到的點（已 LTTB）
-    chart:         null, // Chart.js instance
+    chart:         null, // 溫度圖 Chart.js instance
+    pwChart:       null, // 電力圖 Chart.js instance（v10.1：拆上下子圖）
     cursorTsLeft:  null, // Date
     cursorTsRight: null, // Date
     dragSide:      null, // 'left' | 'right' | null（正在拖哪條線）
@@ -50,6 +52,10 @@
     fieldOrder:    [],   // ['t01','t02',...,'t20','v','i','w']
     visibleFields: new Set(), // 顯示中
     statsTimer:    null, // debounce 統計 API
+    xMin:          null, // 當前 X 軸範圍（兩個圖共享，wheel/pan 都會更新這裡）
+    xMax:          null,
+    xMinOrig:      null, // 資料原始範圍（用於 zoom 邊界檢查）
+    xMaxOrig:      null,
   };
 
   const TEMP_FIELDS = Array.from({ length: 20 }, (_, i) => `t${String(i + 1).padStart(2, "0")}`);
@@ -165,30 +171,37 @@
   // ========== Chart.js 建圖 ==========
 
   function buildChart() {
-    if (state.chart) {
-      state.chart.destroy();
-      state.chart = null;
-    }
+    // 清除舊圖（兩張）
+    if (state.chart)   { state.chart.destroy();   state.chart   = null; }
+    if (state.pwChart) { state.pwChart.destroy(); state.pwChart = null; }
     if (state.rawRows.length === 0) {
       setStatus("備份檔內無資料", "warn");
       return;
     }
 
     const c = getThemeColors();
-    // datasets：每個欄位一條線
-    const datasets = [];
+    // 把資料分成溫度 20 條 + 電力 3 條兩群
+    const tempDatasets = [];
+    const pwDatasets   = [];
     const fields = [...TEMP_FIELDS, ...PW_FIELDS];
+    state.colorMap = {};
     fields.forEach((f, idx) => {
       const color = TEMP_FIELDS.includes(f)
         ? TEMP_PALETTE[idx % TEMP_PALETTE.length]
         : PW_PALETTE[f];
       state.colorMap[f] = color;
-      // 把 rows 攤成 {x, y}（Chart.js parsing:false 直接吃這個）
       const points = state.rawRows
         .filter((r) => r[f] !== null && r[f] !== undefined)
-        .map((r) => ({ x: new Date(r.ts).getTime(), y: r[f] }));
-      datasets.push({
-        label: FIELD_LABELS[f] + " " + (PW_FIELDS.includes(f) ? f.toUpperCase() : ""),
+        .map((r) => {
+          // r.ts 可能是「YYYY-MM-DDTHH:MM:SS」ISO 字串，也可能是 Unix timestamp（純數字字串）
+          // 兩種都安全轉成 ms number。
+          let ms;
+          if (/^\d+$/.test(r.ts)) ms = parseInt(r.ts, 10) * 1000;
+          else ms = new Date(r.ts).getTime();
+          return { x: ms, y: r[f] };
+        });
+      const ds = {
+        label: FIELD_LABELS[f] + (PW_FIELDS.includes(f) ? " (" + f.toUpperCase() + ")" : ""),
         data: points,
         borderColor: color,
         backgroundColor: color + "33",
@@ -197,19 +210,44 @@
         pointHoverRadius: 3,
         tension: 0,
         hidden: false,
-        yAxisID: PW_FIELDS.includes(f) ? "yPW" : "yT",
-      });
+      };
+      if (TEMP_FIELDS.includes(f)) tempDatasets.push(ds);
+      else                         pwDatasets.push(ds);
     });
     state.fieldOrder = fields;
     state.visibleFields = new Set(fields);
 
-    const xMin = datasets[0].data[0]?.x;
-    const xMax = datasets[0].data[datasets[0].data.length - 1]?.x;
+    // 原始 X 軸範圍（從溫度第一筆/最後一筆拿，或 fallback 到電力）
+    const refDs = tempDatasets[0] || pwDatasets[0];
+    const xMin = refDs.data[0]?.x;
+    const xMax = refDs.data[refDs.data.length - 1]?.x;
+    state.xMinOrig = xMin;
+    state.xMaxOrig = xMax;
+    state.xMin = xMin;
+    state.xMax = xMax;
 
-    const ctx = canvas.getContext("2d");
-    state.chart = new Chart(ctx, {
+    const xScaleConfig = (curMin, curMax) => ({
+      type: "time",
+      min: curMin,
+      max: curMax,
+      ticks: { color: c.text },
+      grid:  { color: c.grid },
+      time: {
+        tooltipFormat: "yyyy/MM/dd HH:mm:ss",
+        displayFormats: {
+          second: "HH:mm:ss",
+          minute: "MM/dd HH:mm",
+          hour:   "MM/dd HH:mm",
+          day:    "MM/dd",
+        },
+      },
+    });
+
+    // ---- 上圖：溫度 ----
+    const ctxT = canvas.getContext("2d");
+    state.chart = new Chart(ctxT, {
       type: "line",
-      data: { datasets },
+      data: { datasets: tempDatasets },
       options: {
         responsive: true,
         maintainAspectRatio: false,
@@ -218,7 +256,7 @@
         normalized: true,
         interaction: { mode: "nearest", intersect: false },
         plugins: {
-          legend: { display: false }, // checkbox + 標題列已承擔
+          legend: { display: false },
           tooltip: {
             callbacks: {
               title: (items) => fmtTs(items[0].parsed.x),
@@ -227,92 +265,150 @@
           },
         },
         scales: {
-          x: {
-            type: "time",
-            min: xMin,
-            max: xMax,
-            ticks: { color: c.text },
-            grid:  { color: c.grid },
-            time: {
-              tooltipFormat: "yyyy/MM/dd HH:mm:ss",
-              displayFormats: {
-                second: "HH:mm:ss",
-                minute: "MM/dd HH:mm",
-                hour:   "MM/dd HH:mm",
-                day:    "MM/dd",
-              },
-            },
-          },
-          yT: {
+          x: xScaleConfig(xMin, xMax),
+          y: {
             type: "linear",
             position: "left",
             ticks: { color: c.text },
             grid:  { color: c.grid },
             title: { display: true, text: "溫度 (°C)", color: c.text },
           },
-          yPW: {
-            type: "linear",
-            position: "right",
-            ticks: { color: c.text },
-            grid:  { drawOnChartArea: false },
-            title: { display: true, text: "電力 V/A/W", color: c.text },
-          },
         },
       },
     });
 
+    // ---- 下圖：電力（V/A/W 三軸，左 I/A、左 offset W、右 V） ----
+    if (pwDatasets.length > 0) {
+      const ctxP = pwCanvas.getContext("2d");
+      state.pwChart = new Chart(ctxP, {
+        type: "line",
+        data: { datasets: pwDatasets },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          animation: false,
+          parsing: false,
+          normalized: true,
+          interaction: { mode: "nearest", intersect: false },
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              callbacks: {
+                title: (items) => fmtTs(items[0].parsed.x),
+                label: (item) => `${item.dataset.label}: ${item.parsed.y.toFixed(2)}`,
+              },
+            },
+          },
+          scales: {
+            x: xScaleConfig(xMin, xMax),
+            yI: {
+              type: "linear",
+              position: "left",
+              ticks: { color: c.text },
+              grid:  { color: c.grid },
+              title: { display: true, text: "I (A)", color: c.text },
+            },
+            yW: {
+              type: "linear",
+              position: "left",
+              offset: true,
+              ticks: { color: c.text },
+              grid:  { drawOnChartArea: false },
+              title: { display: true, text: "W (W)", color: c.text },
+            },
+            yV: {
+              type: "linear",
+              position: "right",
+              ticks: { color: c.text },
+              grid:  { drawOnChartArea: false },
+              title: { display: true, text: "V (V)", color: c.text },
+            },
+          },
+        },
+      });
+    } else {
+      pwCanvas.parentElement.style.display = "none";
+    }
+
     bindChartEvents();
   }
 
-  // ========== wheel zoom + drag pan ==========
+  // ========== wheel zoom + drag pan（兩個 chart 同步） ==========
 
   function bindChartEvents() {
-    // wheel zoom（以游標位置為中心）
-    canvas.addEventListener("wheel", onWheelZoom, { passive: false });
-    // drag pan（在 chart 空白處拖曳）
-    canvas.addEventListener("mousedown", onPanStart);
+    // wheel zoom 註冊在 window，內部檢查 event target 是否在任一 chart canvas 上
+    window.addEventListener("wheel", onWheelZoom, { passive: false });
+    // drag pan 同樣 window 接收，裡面判斷 target 屬於哪個 canvas 或 overlay
+    window.addEventListener("mousedown", onPanStart);
+  }
+
+  /**
+   * 在兩個 chart 之間共用 X 軸：只改一份範圍，兩個 chart 同步重繪。
+   */
+  function setXRange(newMin, newMax) {
+    state.xMin = newMin;
+    state.xMax = newMax;
+    if (state.chart) {
+      state.chart.options.scales.x.min = newMin;
+      state.chart.options.scales.x.max = newMax;
+      state.chart.update("none");
+    }
+    if (state.pwChart) {
+      state.pwChart.options.scales.x.min = newMin;
+      state.pwChart.options.scales.x.max = newMax;
+      state.pwChart.update("none");
+    }
+    layoutCursorBars();
   }
 
   function onWheelZoom(e) {
     if (!state.chart) return;
-    e.preventDefault();
-    const chartArea = state.chart.chartArea;
+    const target = e.target;
+    // 找到最近 chart pane，判斷是溫度還是電力
+    const pane = target.closest && target.closest('.chart-temp, .chart-pw');
+    if (!pane) return;
+    const isTemp = pane.classList.contains('chart-temp');
+    const isPw   = pane.classList.contains('chart-pw');
+    const activeChart = isTemp ? state.chart : (isPw ? state.pwChart : null);
+    if (!activeChart) return;
+    const chartArea = activeChart.chartArea;
     if (!chartArea) return;
-    const rect = canvas.getBoundingClientRect();
+    const activeCanvas = isTemp ? canvas : pwCanvas;
+    const rect = activeCanvas.getBoundingClientRect();
     const mouseX = e.clientX - rect.left;
-    // 確認滑鼠在 chart area 內
     if (mouseX < chartArea.left || mouseX > chartArea.right) return;
-    const xScale = state.chart.scales.x;
+    e.preventDefault();
+    const xScale = activeChart.scales.x;
     const xAtCursor = xScale.getValueForPixel(mouseX);
-    const factor = e.deltaY > 0 ? 1.25 : 0.8; // 向下滾放大、向上縮小（常見慣例）
+    const factor = e.deltaY > 0 ? 0.8 : 1.25; // 向下滾放大、向上縮小（macOS/網頁地圖慣例）
     const curMin = xScale.min;
     const curMax = xScale.max;
     const range = curMax - curMin;
     const newRange = range * factor;
-    // 保持游標位置不動：cursorX = (mouseX - chartArea.left) / chartArea.width = (xAtCursor - newMin) / newRange
     const ratio = (xAtCursor - curMin) / range;
     let newMin = xAtCursor - newRange * ratio;
     let newMax = newMin + newRange;
     // 不允許超出原始資料範圍
-    const origMin = state.chart.options.scales.x.min;
-    const origMax = state.chart.options.scales.x.max;
+    const origMin = state.xMinOrig;
+    const origMax = state.xMaxOrig;
     if (newMin < origMin) { newMin = origMin; newMax = newMin + newRange; }
     if (newMax > origMax) { newMax = origMax; newMin = newMax - newRange; }
-    state.chart.options.scales.x.min = newMin;
-    state.chart.options.scales.x.max = newMax;
-    state.chart.update("none");
-    layoutCursorBars();
+    setXRange(newMin, newMax);
   }
 
   function onPanStart(e) {
     if (!state.chart) return;
-    // 只在 chartArea 內、且沒點到游標線時啟動
-    if (e.target !== canvas) return;
+    const target = e.target;
+    // 找到最近 chart pane（.chart-temp / .chart-pw 任一）
+    const pane = target.closest && target.closest('.chart-temp, .chart-pw');
+    if (!pane) return;
+    // 若是 cursor bar/overlay 內的元素，交給 cursor 拖曳（bindCursorDrag 內 stopPropagation，但保險再判一次）
+    if (cursorOverlay && cursorOverlay.contains && cursorOverlay.contains(target)) return;
     const xScale = state.chart.scales.x;
     state.panStart = {
       mouseX: e.clientX,
-      xMin: xScale.min,
-      xMax: xScale.max,
+      xMin: state.xMin,
+      xMax: state.xMax,
     };
     const onMove = (ev) => {
       if (!state.panStart) return;
@@ -322,15 +418,12 @@
       const msShift = -dx * pxPerMs;
       let newMin = state.panStart.xMin + msShift;
       let newMax = state.panStart.xMax + msShift;
-      const origMin = state.chart.options.scales.x.min ?? -Infinity;
-      const origMax = state.chart.options.scales.x.max ?? Infinity;
-      // 邊界檢查
-      if (newMin < origMin) { newMin = origMin; newMax = newMin + (state.panStart.xMax - state.panStart.xMin); }
-      if (newMax > origMax) { newMax = origMax; newMin = newMax - (state.panStart.xMax - state.panStart.xMin); }
-      state.chart.options.scales.x.min = newMin;
-      state.chart.options.scales.x.max = newMax;
-      state.chart.update("none");
-      layoutCursorBars();
+      const origMin = state.xMinOrig;
+      const origMax = state.xMaxOrig;
+      const span = state.panStart.xMax - state.panStart.xMin;
+      if (newMin < origMin) { newMin = origMin; newMax = newMin + span; }
+      if (newMax > origMax) { newMax = origMax; newMin = newMax - span; }
+      setXRange(newMin, newMax);
     };
     const onUp = () => {
       window.removeEventListener("mousemove", onMove);
@@ -345,10 +438,9 @@
 
   function resetCursorPositions() {
     if (!state.chart) return;
-    const xScale = state.chart.scales.x;
-    const range = xScale.max - xScale.min;
-    state.cursorTsLeft  = new Date(xScale.min + range * 0.25);
-    state.cursorTsRight = new Date(xScale.min + range * 0.75);
+    const range = state.xMax - state.xMin;
+    state.cursorTsLeft  = new Date(state.xMin + range * 0.25);
+    state.cursorTsRight = new Date(state.xMin + range * 0.75);
     cursorOverlay.classList.add("active");
     cursorRange.hidden = false;
     cursorLeft.hidden = false;
@@ -486,10 +578,14 @@
     checkboxesBox.querySelectorAll("input[type=checkbox]").forEach((cb) => {
       cb.addEventListener("change", () => {
         const f = cb.dataset.field;
-        const dsIdx = state.chart.data.datasets.findIndex((d) => d.label.startsWith(FIELD_LABELS[f]));
-        if (dsIdx >= 0) {
-          state.chart.data.datasets[dsIdx].hidden = !cb.checked;
-          state.chart.update("none");
+        // 溫度欄位看 state.chart，電力欄位看 state.pwChart
+        const owner = PW_FIELDS.includes(f) ? state.pwChart : state.chart;
+        if (owner) {
+          const dsIdx = owner.data.datasets.findIndex((d) => d.label.startsWith(FIELD_LABELS[f]));
+          if (dsIdx >= 0) {
+            owner.data.datasets[dsIdx].hidden = !cb.checked;
+            owner.update("none");
+          }
         }
         if (cb.checked) state.visibleFields.add(f);
         else state.visibleFields.delete(f);

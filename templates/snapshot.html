@@ -34,17 +34,22 @@
 
 <main class="snapshot-main">
   <section class="chart-area">
-    <div class="chart-pane chart-temp snapshot-chart">
-      <canvas id="chart"></canvas>
-      <!-- 游標模式 overlay：兩條 X-line + 區間 highlight -->
-      <div id="cursorOverlay" class="cursor-overlay" aria-hidden="true">
-        <div id="cursorRange" class="cursor-range" hidden></div>
-        <div id="cursorLeft"  class="cursor-bar cursor-left"  data-side="left"  hidden>
-          <span class="cursor-time" id="cursorLeftTime"></span>
+    <div class="chart-stack snapshot-stack">
+      <div class="chart-pane chart-temp snapshot-chart">
+        <canvas id="chart"></canvas>
+        <!-- 游標模式 overlay：兩條 X-line + 區間 highlight -->
+        <div id="cursorOverlay" class="cursor-overlay" aria-hidden="true">
+          <div id="cursorRange" class="cursor-range" hidden></div>
+          <div id="cursorLeft"  class="cursor-bar cursor-left"  data-side="left"  hidden>
+            <span class="cursor-time" id="cursorLeftTime"></span>
+          </div>
+          <div id="cursorRight" class="cursor-bar cursor-right" data-side="right" hidden>
+            <span class="cursor-time" id="cursorRightTime"></span>
+          </div>
         </div>
-        <div id="cursorRight" class="cursor-bar cursor-right" data-side="right" hidden>
-          <span class="cursor-time" id="cursorRightTime"></span>
-        </div>
+      </div>
+      <div class="chart-pane chart-pw snapshot-chart-pw">
+        <canvas id="pwChart"></canvas>
       </div>
     </div>
     <div class="snapshot-zoom-hint">

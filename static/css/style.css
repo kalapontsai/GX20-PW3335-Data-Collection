@@ -709,4 +709,13 @@ body.cursor-mode .chart-temp { flex: 1 1 0; }
 .status-badge.err { background: var(--danger);  color: #fff;              border-color: var(--danger); }
 .status-badge.warn{ background: var(--accent);  color: #2a2a1a;          border-color: var(--accent); }
 
-/* snapshot 頁面不需要電力圖 70/30 切分，沿用 .chart-temp 即可 */
+/* snapshot 頁面沿用即時頁 70/30 切分（溫度上 / 電力下），共兩個 chart-pane */
+.snapshot-stack {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+/* .snapshot-stack 內的 .chart-temp 強制 7:3 切分（蓋掉 .snapshot-chart 的 flex:1） */
+.snapshot-stack > .chart-temp { flex: 7 1 0; min-height: 240px; }
+.snapshot-stack > .chart-pw   { flex: 3 1 0; border-top: 1px solid var(--border); min-height: 120px; }
