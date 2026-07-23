@@ -1,6 +1,6 @@
 # GX20 Web Monitor — 版本演進與現況
 
-> 大版本快照 + 重要 bug 修復 + 現況進度（最後更新：2026-07-22）
+> 大版本快照 + 重要 bug 修復 + 現況進度（最後更新：2026-07-23）
 >
 > 程式架構見 [ARCHITECTURE.md](ARCHITECTURE.md)；使用者操作見 [README.md](README.md)。
 
@@ -16,6 +16,9 @@
 6. [現況進度（2026-06-16 設定同步 v8.1/v8.1.1/v8.1.2）](#6-現況進度2026-06-16-設定同步-v8-1-v8-1-1-v8-1-2)
 7. [現況進度（2026-06-16 X 軸寬度對齊 v8.2）](#7-現況進度2026-06-16-x-軸寬度對齊-v8-2)
 8. [現況進度（2026-06-16 電力 I/W 軸位置對齊 v8.4）](#8-現況進度2026-06-16-電力-iw-軸位置對齊-v8-4)
+9. [現況進度（2026-07-01 CSV datetime 格式 v9）](#9-現況進度2026-07-01-csv-datetime-格式-v9)
+10. [現況進度（2026-07-22 snapshot viewer v10）](#10-現況進度2026-07-22-snapshot-viewer-v10)
+11. [現況進度（2026-07-23 備註同步 + archive meta v10.1）](#11-現況進度2026-07-23-備註同步--archive-meta-v101)
 
 ---
 
@@ -901,3 +904,62 @@ W 線 0~200 佔 W 軸 90.91%
 - 本機 Flask 起 server：`GET /` / `/settings` / `/snapshot` 都 200；既有路由未受影響
 - 攻擊測試：`?filename=../../etc/passwd` 回 400；`?filename=..%2F..%2Fetc%2Fpasswd` 回 400
 - OTA 端（`<OTA_HOST>:5000`）實機驗收：大大手動確認三條需求通過後才 commit
+
+
+---
+
+## 11. 現況進度（2026-07-23 備註同步 + archive meta v10.1）
+
+兩個 commit 合併上線，都是補 v10 snapshot viewer 的最後一塊拼圖。
+
+### 11.1 備註欄 per-station 同步（commit `1430f8c`）
+
+**症狀（bug fix）**：
+v10 之前的歷史 commit `e0a0a9f`（2026-06-18）已經在 `index.html` 加了 `<input id=noteBox>`，但只有 HTML 沒有 JS 配套。
+備註欄從來就沒生效過 — 輸入存不進 server、切工位不會重置、reload 後消失。
+
+**修法**：
+- 後端 `config.py` `default_settings()` 加 `notes` key，預設 `{工位1..6: ""}`
+- 後端 `app.py` `load_settings()` / `save_settings()`：notes per-station 跟 `ch_alias` 同樣 merge 邏輯
+- 前端 `storage.js` `GX20State` 三處加 notes：dirty snapshot + save payload + sessionStorage 回寫
+- 前端 `main.js` `noteBox` 雙向綁定：
+  - `loadNoteForCurrentStation()` 讀 `GX20State.settings.notes[currentStation]`
+  - `oninput` → `GX20State.update('notes', ...)` 走 300ms debounce auto-save
+  - `switchStation()` 切換前 `saveNoteForStation()`、切換後 `loadNoteForCurrentStation()`
+- 前端 `main.js` `applyRemoteUiLocks()` 遠端隱藏 noteBox（跟 settings 一樣鎖本機）
+- 截斷到 20 字防線（HTML maxlength + 前端 slice + 後端 `[:20]`）
+
+**驗收**（`scripts/smoke_note_v10x.py`，6 條 path 全過）：
+1. 載入頁面 → noteBox 預設空
+2. 寫 ABC → 等 debounce → server 端工位 1 拿到 ABC
+3. 切工位 2 → noteBox 清空、工位 1 沒被清
+4. 切回工位 1 → 顯示 ABC
+5. 工位 2 寫測試 2 → 兩工位獨立
+6. reload 頁面 → 兩工位都還原（從 server 拉回）
+
+0 console error。
+
+### 11.2 歸檔 dump alias + note 到 `.meta.json`（commit `1728939`）
+
+**動機**：
+v10 snapshot viewer 載入 archive DB 時，圖例只能用預設 `Ch01 ~ Ch20`，無法還原「當時」的使用者別名；備註也只能直接寫在圖上。
+
+**功能**：
+- 後端 `storage.archive_station()` 歸檔時**同時**寫 `<archive>.db.meta.json`
+  - meta 內容：`{station, archived_at, schema, alias, note}`
+  - `alias` 若跟 `default_alias()` 一致就寫 `null`（表示未設），避免永遠寫大資料
+  - `note` 若為空字串就寫 `null`
+- 後端：`api_snapshot_data` response 加 `meta` 欄位
+- 前端 `snapshot.js` `loadArchive()` 套用 `meta` 覆蓋 `FIELD_LABELS` + 頂部備註顯示
+  - 新增 `state.activeLabels` + `state.activeNote` + `activeLabel()` helper
+- 前端 HTML：加 `<span id=archiveNote>`，CSS：加 `.archive-note` 樣式
+- 後端 `_prune_old_archives()`：改用 `*.db` 結尾判定主檔（排除 `.db.meta.json` 誤刪）
+
+**驗收**（`scripts/smoke_archive_meta_v10x.py` + `scripts/smoke_archive_meta_visual.py`）：
+- 帶 meta 備份：`dataset.label='sensor-A'`、`archiveNote` text=`高溫警報測試`
+- 沒 meta 備份：`dataset.label='T01'`（預設）、`archiveNote` hidden
+- `meta.alias=null` + `note=null` 表示「未設」→ 退回預設
+
+**設計決策（避免備份膨脹）**：
+alias 全等於 `default_alias()` 時就**不寫實際值**，只標記 `null`。
+理由：歸檔頻率受「清除前歸檔」(v5) 觸發，量大時 .meta.json 寫滿 alias 會比 .db 還大。
