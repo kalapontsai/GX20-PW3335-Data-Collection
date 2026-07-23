@@ -15,7 +15,7 @@ REM  To view log:
 REM    type logs\watchdog.log
 REM
 REM  To stop:
-REM    taskkill /F /IM python.exe
+REM    taskkill /F /IM pythonw.exe
 REM ============================================================
 
 REM Force UTF-8 codepage (harmless for ASCII content; helps if log is UTF-8)
@@ -35,6 +35,6 @@ echo Watch dog started in background. You may close this window.
 echo.
 echo To check status : netstat -ano | findstr :5000
 echo To view log     : type logs\watchdog.log
-echo To stop         : taskkill /F /IM python.exe
+echo To stop         : taskkill /F /IM pythonw.exe
 echo.
 pause
