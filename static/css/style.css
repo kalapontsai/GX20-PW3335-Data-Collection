@@ -657,6 +657,28 @@ body.cursor-mode .chart-temp { flex: 1 1 0; }
   color: var(--text);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
+
+/* v10.x：備份當下的備註文字 */
+.archive-note {
+  margin-left: auto;
+  padding: 4px 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 13px;
+  color: var(--text);
+  font-style: italic;
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.archive-note::before {
+  content: "備註：";
+  color: var(--text-dim);
+  font-style: normal;
+  margin-right: 4px;
+}
 .swatch {
   display: inline-block;
   width: 10px;

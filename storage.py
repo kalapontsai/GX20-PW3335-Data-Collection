@@ -29,9 +29,12 @@ import re
 import shutil
 import sqlite3
 import logging
+import json
 from contextlib import contextmanager
 from typing import Dict, List, Optional, Any, Iterator, Tuple
 from datetime import datetime, timedelta
+
+import config  # v10.x：讀 defaults / from_json 給 archive meta 用
 
 log = logging.getLogger("storage")
 
@@ -315,10 +318,89 @@ def _archive_path(station: str, ts_str: str) -> str:
     return os.path.join(ARCHIVE_DIR, f"gx20_{station}_{ts_str}.db")
 
 
+def _archive_meta_path(archive_db_path: str) -> str:
+    """備份 DB 對應的 meta JSON 檔路徑。"""
+    return archive_db_path + ".meta.json"
+
+
+def _build_archive_meta(station: str) -> Optional[dict]:
+    """備份當下拍下該工位的 alias + note 等顯示設定。
+
+    snapshot 頁讀取備份時、若有 meta 就用裡面的值覆蓋預設別名。
+    讀不到任何設定也照樣寫一個空 meta（保證檔案存在、表示「歸檔當下沒有額外設定」）。
+    """
+    try:
+        defaults = config.default_settings()
+    except Exception as e:
+        log.warning("_build_archive_meta: 取 defaults 失敗 (%s)，只寫基本 meta", e)
+        defaults = {}
+
+    meta = {
+        "station":     station,
+        "archived_at": datetime.now().isoformat(timespec="seconds"),
+        "schema":      1,
+        "alias":       None,        # 改 None 表示「沒設過」
+        "note":        None,
+    }
+    try:
+        alias_raw = get_setting("ch_alias")
+        alias_obj = config.from_json(alias_raw, default=defaults.get("ch_alias"))
+        if isinstance(alias_obj, dict):
+            arr = alias_obj.get(station)
+            if isinstance(arr, list):
+                truncated = [str(x or "")[:20] for x in arr]
+                # v10.x：若 alias 與預設完全一致，視為「未設定」→ meta.alias=null
+                #         （讓 snapshot 退回顯示預設別名）
+                default_alias = defaults.get("ch_alias", {}).get(station) if isinstance(defaults.get("ch_alias"), dict) else None
+                if default_alias and truncated == default_alias:
+                    meta["alias"] = None
+                else:
+                    meta["alias"] = truncated
+    except Exception as e:
+        log.warning("_build_archive_meta: alias 讀取失敗 (%s)，跳過", e)
+
+    try:
+        notes_raw = get_setting("notes")
+        notes_obj = config.from_json(notes_raw, default=defaults.get("notes"))
+        if isinstance(notes_obj, dict):
+            v = notes_obj.get(station)
+            if isinstance(v, str):
+                truncated = v[:20]
+                # v10.x：note 為空字串視為「未設定」→ meta.note=null
+                if truncated.strip() == "":
+                    meta["note"] = None
+                else:
+                    meta["note"] = truncated
+    except Exception as e:
+        log.warning("_build_archive_meta: note 讀取失敗 (%s)，跳過", e)
+
+    return meta
+
+
+def read_archive_meta(filename: str) -> Optional[dict]:
+    """讀取備份 DB 對應的 meta JSON。檔案不存在或格式不正確回傳 None。"""
+    # filename 只接受 basename（防路徑傳入）
+    safe = os.path.basename(filename)
+    db_path = os.path.join(ARCHIVE_DIR, safe)
+    meta_path = _archive_meta_path(db_path)
+    if not os.path.exists(meta_path):
+        return None
+    try:
+        with open(meta_path, "r", encoding="utf-8") as f:
+            data = json.loads(f.read())
+        if not isinstance(data, dict):
+            return None
+        return data
+    except Exception as e:
+        log.warning("read_archive_meta: %s 讀取失敗 (%s)", meta_path, e)
+        return None
+
+
 def archive_station(station: str) -> Optional[str]:
     """
     把指定工位的 samples DB 歸檔到 archive/，並回傳歸檔檔路徑。
     若該工位 DB 不存在或無資料，回傳 None。
+    同時 dump 該工位當下的 alias + note 到 .meta.json。
     """
     assert station in _stations(), f"未知工位: {station}"
     src = samples_db_path(station)
@@ -337,6 +419,17 @@ def archive_station(station: str) -> Optional[str]:
         log.error("archive_station: %s 歸檔失敗: %s", station, e)
         return None
 
+    # v10.x：dump 顯示設定到 .meta.json（snapshot 讀取時覆蓋預設別名）
+    try:
+        meta = _build_archive_meta(station)
+        if meta is not None:
+            meta_path = _archive_meta_path(dst)
+            with open(meta_path, "w", encoding="utf-8") as f:
+                json.dump(meta, f, ensure_ascii=False, indent=2)
+            log.info("archive_station: %s meta 寫入 %s", station, meta_path)
+    except Exception as e:
+        log.warning("archive_station: %s meta 寫入失敗: %s", station, e)
+
     # 輪替：超過 ARCHIVE_KEEP_PER_STATION 份，刪最舊
     _prune_old_archives(station)
     return dst
@@ -347,8 +440,11 @@ def _prune_old_archives(station: str) -> int:
     pattern = os.path.join(ARCHIVE_DIR, f"gx20_{station}_*.db*")
     files = sorted(glob.glob(pattern))
     # 同檔可能被列出多次（含 -wal, -shm, -journal）
-    # 依主檔名分組
-    main_files = [f for f in files if not f.endswith(("-wal", "-shm", "-journal"))]
+    # 主檔定義：.db 結尾
+    main_files = [
+        f for f in files
+        if f.endswith(".db")  # 只算純 .db 主檔，不算 .db-wal / .db.meta.json 等
+    ]
     if len(main_files) <= ARCHIVE_KEEP_PER_STATION:
         return 0
     to_delete = main_files[:-ARCHIVE_KEEP_PER_STATION]
@@ -361,6 +457,10 @@ def _prune_old_archives(station: str) -> int:
                 p = f + ext
                 if os.path.exists(p):
                     os.remove(p)
+            # v10.x：連 .meta.json 也一起刪（保持一致性）
+            meta_p = _archive_meta_path(f)
+            if os.path.exists(meta_p):
+                os.remove(meta_p)
             deleted += 1
         except OSError as e:
             log.warning("刪除歸檔 %s 失敗: %s", f, e)

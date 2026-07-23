@@ -56,13 +56,23 @@
     xMax:          null,
     xMinOrig:      null, // 資料原始範圍（用於 zoom 邊界檢查）
     xMaxOrig:      null,
+    // v10.x：備份讀取時、若有 meta 就用裡面的 alias + note 覆蓋預設別名與備註
+    activeLabels:  {},   // {field: alias string}（若該 field 沒覆蓋，用 FIELD_LABELS[field]）
+    activeNote:    "",   // 備份當下的備註文字（顯示在 snapshot 頁頂部）
   };
 
   const TEMP_FIELDS = Array.from({ length: 20 }, (_, i) => `t${String(i + 1).padStart(2, "0")}`);
   const PW_FIELDS = ["v", "i", "w"];
-  const FIELD_LABELS = {};
+  const FIELD_LABELS = {};       // 預設別名（T01..T20 / V / I / W）
   TEMP_FIELDS.forEach((f) => { FIELD_LABELS[f] = `T${f.slice(1)}`; });
   FIELD_LABELS.v = "V"; FIELD_LABELS.i = "I"; FIELD_LABELS.w = "W";
+
+  // v10.x：拿「當下生效」的 label（若 meta 有設定且非空，用 meta 的；否則用預設 FIELD_LABELS）
+  function activeLabel(f) {
+    const v = state.activeLabels[f];
+    if (typeof v === "string" && v.trim()) return v.trim();
+    return FIELD_LABELS[f];
+  }
 
   // ========== 主色（沿用 CSS 變數後備用，這裡給 Chart.js 用） ==========
   // 溫度線用 20 種區分色；電力 3 條用預設配色
@@ -143,16 +153,49 @@
     const filename = archiveSel.value;
     if (!station || !filename) return;
 
+    console.log("[snapshot] loadArchive START", filename, "archiveSel.value=", archiveSel.value);
     state.station = station;
     state.archiveFilename = filename;
     setStatus(`讀取 ${filename}…`);
     loadBtn.disabled = true;
 
     try {
+      console.log("[snapshot] fetch START", filename);
       const r = await fetch(`/api/snapshot/data?filename=${encodeURIComponent(filename)}&max_points=2000`);
+      console.log("[snapshot] fetch DONE", filename, "status=", r.status);
       const body = await r.json();
+      console.log("[snapshot] body parsed, meta=", body.meta);
       if (!body.ok) throw new Error(body.message || body.error || "unknown");
       state.rawRows = body.rows;
+
+      // v10.x：套用備份當下的 alias + note （meta 缺失時用空別名 = 退回預設 T01..T20）
+      const meta = body.meta;
+      state.activeLabels = {};
+      state.activeNote = "";
+      if (meta && typeof meta === "object") {
+        const alias = meta.alias;
+        if (Array.isArray(alias)) {
+          TEMP_FIELDS.forEach((f, i) => {
+            const v = alias[i];
+            if (typeof v === "string") state.activeLabels[f] = v;
+          });
+        }
+        if (typeof meta.note === "string") state.activeNote = meta.note;
+      }
+      // 頂部備註顯示
+      const noteEl = document.getElementById("archiveNote");
+      console.log("[snapshot] meta=", meta, "activeNote=", JSON.stringify(state.activeNote));
+      if (noteEl) {
+        if (state.activeNote) {
+          noteEl.textContent = state.activeNote;
+          noteEl.hidden = false;
+        } else {
+          noteEl.textContent = "";
+          noteEl.hidden = true;
+        }
+        console.log("[snapshot] noteEl after=", { hidden: noteEl.hidden, text: noteEl.textContent });
+      }
+
       setStatus(`${filename} 共 ${body.original_count.toLocaleString()} 筆（顯示 ${body.count}）`, "ok");
 
       buildChart();
@@ -161,10 +204,11 @@
       // 載入完成後自動拉一次全段統計
       await refreshStats();
     } catch (e) {
-      console.error("loadArchive failed:", e);
+      console.error("[snapshot] loadArchive FAILED:", e);
       setStatus(`載入失敗: ${e.message}`, "err");
     } finally {
       loadBtn.disabled = false;
+      console.log("[snapshot] loadArchive END", filename);
     }
   }
 
@@ -201,7 +245,7 @@
           return { x: ms, y: r[f] };
         });
       const ds = {
-        label: FIELD_LABELS[f] + (PW_FIELDS.includes(f) ? " (" + f.toUpperCase() + ")" : ""),
+        label: activeLabel(f) + (PW_FIELDS.includes(f) ? " (" + f.toUpperCase() + ")" : ""),
         data: points,
         borderColor: color,
         backgroundColor: color + "33",
@@ -543,12 +587,12 @@
     TEMP_FIELDS.forEach((f) => {
       if (!state.visibleFields.has(f)) return; // 只列顯示中
       const s = stats[f] || { count: 0, avg: null, min: null, max: null };
-      rows.push({ label: FIELD_LABELS[f], field: f, ...s });
+      rows.push({ label: activeLabel(f), field: f, ...s });
     });
     PW_FIELDS.forEach((f) => {
       if (!state.visibleFields.has(f)) return;
       const s = stats[f] || { count: 0, avg: null, min: null, max: null };
-      rows.push({ label: FIELD_LABELS[f], field: f, ...s });
+      rows.push({ label: activeLabel(f), field: f, ...s });
     });
     statsTableBody.innerHTML = rows.map((r) => `
       <tr data-field="${r.field}">
@@ -571,7 +615,7 @@
         <label class="snapshot-cb">
           <input type="checkbox" data-field="${f}" checked>
           <span class="swatch" style="background:${color}"></span>
-          <span class="snapshot-cb-label">${FIELD_LABELS[f]}</span>
+          <span class="snapshot-cb-label">${activeLabel(f)}</span>
         </label>
       `;
     }).join("");
@@ -581,7 +625,7 @@
         // 溫度欄位看 state.chart，電力欄位看 state.pwChart
         const owner = PW_FIELDS.includes(f) ? state.pwChart : state.chart;
         if (owner) {
-          const dsIdx = owner.data.datasets.findIndex((d) => d.label.startsWith(FIELD_LABELS[f]));
+          const dsIdx = owner.data.datasets.findIndex((d) => d.label.startsWith(activeLabel(f)));
           if (dsIdx >= 0) {
             owner.data.datasets[dsIdx].hidden = !cb.checked;
             owner.update("none");

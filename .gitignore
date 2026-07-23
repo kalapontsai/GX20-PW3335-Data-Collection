@@ -48,3 +48,4 @@ screenshots/
 # playwright 預設產出位置
 test-results/
 playwright-report/
+.trash_archive_*

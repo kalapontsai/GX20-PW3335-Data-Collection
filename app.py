@@ -1144,6 +1144,10 @@ def api_snapshot_data():
         "max_points": max_points,
         "ts_min": ts_min,
         "ts_max": ts_max,
+        # v10.x：歸檔當時 dump 的該工位顯示設定（alias + note）。
+        # snapshot 讀取時可選用這些值覆蓋預設別名 / 顯示備註。
+        # 檔案不存在或缺欄位時 meta=null，不影響原本流程。
+        "meta": storage.read_archive_meta(fn),
     })
 
 
