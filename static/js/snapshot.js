@@ -98,6 +98,15 @@
     return `${d.getFullYear()}/${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
   }
 
+  // 跟 fmtTs 一樣用本地時間，但回傳 ISO 風格字串給後端 SQL 字串比對用。
+  // 用途：避免 Date.toISOString() 預設用 UTC，導致送給後端的 ts_min/ts_max
+  //       跟 DB 內台北時間字串對不上、SQL count=0。
+  function fmtTsIso(ts) {
+    const d = ts instanceof Date ? ts : new Date(ts);
+    const pad = (n) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  }
+
   function getThemeColors() {
     const dark = document.body.dataset.theme === "dark";
     return {
@@ -569,8 +578,9 @@
 
   async function refreshStats() {
     if (!state.archiveFilename || !state.cursorTsLeft || !state.cursorTsRight) return;
-    const t1 = state.cursorTsLeft.toISOString().slice(0, 19);
-    const t2 = state.cursorTsRight.toISOString().slice(0, 19);
+    // 用本地時間字串送出 — 不要用 toISOString()（永遠 UTC，會跟 DB 內台北時間對不上，count=0）
+    const t1 = fmtTsIso(state.cursorTsLeft);
+    const t2 = fmtTsIso(state.cursorTsRight);
     const url = `/api/snapshot/stats?filename=${encodeURIComponent(state.archiveFilename)}&ts_min=${encodeURIComponent(t1)}&ts_max=${encodeURIComponent(t2)}`;
     try {
       const r = await fetch(url);
