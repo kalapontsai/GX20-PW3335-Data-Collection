@@ -87,8 +87,16 @@
   // ========== 工具 ==========
 
   function setStatus(text, kind) {
-    statusBadge.textContent = text;
-    statusBadge.className = "status-badge" + (kind ? " " + kind : "");
+    // v10.1.2：簡化 statusBadge — 只在 err 顯示訊息，其餘狀態隱藏（不再顯示「讀取中…」「共 N 筆」這類）
+    if (kind === "err") {
+      statusBadge.textContent = text;
+      statusBadge.className = "status-badge err";
+      statusBadge.hidden = false;
+    } else {
+      statusBadge.textContent = "";
+      statusBadge.className = "status-badge";
+      statusBadge.hidden = true;
+    }
   }
 
   function fmtTs(ts) {

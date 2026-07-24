@@ -668,7 +668,8 @@ body.cursor-mode .chart-temp { flex: 1 1 0; }
   font-size: 13px;
   color: var(--text);
   font-style: italic;
-  max-width: 320px;
+  /* v10.1.2：拉寬到能完整顯示 20 個中文字（13px 字 ~18px 寬，20 字 ≈ 360px，加 padding/border 約 480px） */
+  max-width: 480px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
