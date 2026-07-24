@@ -291,7 +291,8 @@
       type: "time",
       min: curMin,
       max: curMax,
-      ticks: { color: c.text },
+      // v10.1.4：參考 index.html 主頁 ticks 設定，加 autoSkip 避免 tick 過多
+      ticks: { color: c.text, maxRotation: 0, autoSkipPadding: 20, source: "auto" },
       grid:  { color: c.grid },
       time: {
         tooltipFormat: "yyyy/MM/dd HH:mm:ss",
@@ -514,14 +515,18 @@
   function layoutCursorBars() {
     if (!state.chart || !state.cursorTsLeft) return;
     const xScale = state.chart.scales.x;
-    const chartArea = state.chart.chartArea;
     const leftPx  = xScale.getPixelForValue(state.cursorTsLeft.getTime());
     const rightPx = xScale.getPixelForValue(state.cursorTsRight.getTime());
-    const overlayRect = cursorOverlay.getBoundingClientRect();
-    const chartRect = canvas.getBoundingClientRect();
-    // overlay 對齊 chartArea 的相對位置
-    const leftOffset  = leftPx - (chartArea.left - (chartRect.left - overlayRect.left));
-    const rightOffset = rightPx - (chartArea.left - (chartRect.left - overlayRect.left));
+    // Chart.js getPixelForValue(value) 回傳 canvas 相對 px
+    // （scale._startPixel = chartArea.left，chartArea.left 是 canvas 內 padding.left = canvas 相對）
+    // CSS .cursor-overlay { inset: 8px }：游標線 CSS left 是相對於 overlay 內容區
+    // 轉換：leftOffset = leftPx - 8 = canvas 相對 px - overlay padding
+    // v10.1.4：原算法扣 chartArea.left 讓游標線偏左 (Y軸寬度 - padding) px
+    // 參考主頁 main.js line 1453：leftCss = (chartArea.left - padding) + (leftPx - chartArea.left)
+    //                            = leftPx - padding ← 證實 leftPx 是 canvas 相對 px
+    const overlayPadding = 8;
+    const leftOffset  = leftPx - overlayPadding;
+    const rightOffset = rightPx - overlayPadding;
     cursorLeft.style.left  = leftOffset  + "px";
     cursorRight.style.left = rightOffset + "px";
     cursorRange.style.left  = Math.min(leftOffset, rightOffset) + "px";
@@ -541,13 +546,15 @@
         const chartRect = canvas.getBoundingClientRect();
         const xScale = state.chart.scales.x;
         const chartArea = state.chart.chartArea;
-        const px = ev.clientX - chartRect.left;
-        // 限制在 chartArea 內
-        const clampedPx = Math.max(chartArea.left - chartRect.left, Math.min(chartArea.right - chartRect.left, px));
-        const ms = xScale.getValueForPixel(clampedPx + (chartRect.left));
-        // ↑ getValueForPixel 吃的是 canvas 座標系內的 px
-        const ms2 = xScale.getValueForPixel(ev.clientX - canvas.getBoundingClientRect().left);
-        const ts = new Date(ms2);
+        // Chart.js getValueForPixel(px) 期望 px 是 canvas 相對 px（chartArea.left 是 canvas 內 padding，非 viewport 座標）
+        // 參考主頁 main.js line 1501：const ts = xScale.getValueForPixel(xInChart);
+        //                     xInChart = e.clientX - rect.left
+        // v10.1.4：與主頁一致，不扣 Y 軸寬度
+        // 限制在 chartArea 範圍內（避免拖到 Y 軸上還繼續觸發）
+        const canvasPx = ev.clientX - chartRect.left;
+        const clampedPx = Math.max(chartArea.left, Math.min(chartArea.right, canvasPx));
+        const ms = xScale.getValueForPixel(clampedPx);
+        const ts = new Date(ms);
         if (state.dragSide === "left")  state.cursorTsLeft  = ts;
         if (state.dragSide === "right") state.cursorTsRight = ts;
         // 確保 left <= right
