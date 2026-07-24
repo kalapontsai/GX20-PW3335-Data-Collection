@@ -28,7 +28,9 @@ REM /B = same window / background
 REM /MIN = minimized
 REM We use CALL instead of directly invoking so a syntax error in the
 REM parent bat does not break the child bat.
-start "" /B /MIN cmd /c ota_watchdog.bat
+REM powershell cmd : Start-Process ota_watchdog.exe -WindowStyle Hidden
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command ^
+"Start-Process '%~dp0ota_watchdog.bat' -WindowStyle Hidden"
 
 echo.
 echo Watch dog started in background. You may close this window.
