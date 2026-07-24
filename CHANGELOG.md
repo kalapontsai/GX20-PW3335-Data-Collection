@@ -1,6 +1,6 @@
 # GX20 Web Monitor — 版本演進與現況
 
-> 大版本快照 + 重要 bug 修復 + 現況進度（最後更新：2026-07-23）
+> 大版本快照 + 重要 bug 修復 + 現況進度（最後更新：2026-07-24）
 >
 > 程式架構見 [ARCHITECTURE.md](ARCHITECTURE.md)；使用者操作見 [README.md](README.md)。
 
@@ -19,6 +19,7 @@
 9. [現況進度（2026-07-01 CSV datetime 格式 v9）](#9-現況進度2026-07-01-csv-datetime-格式-v9)
 10. [現況進度（2026-07-22 snapshot viewer v10）](#10-現況進度2026-07-22-snapshot-viewer-v10)
 11. [現況進度（2026-07-23 備註同步 + archive meta v10.1）](#11-現況進度2026-07-23-備註同步--archive-meta-v101)
+12. [現況進度（2026-07-24 主頁 rate 計算語意修正 v11）](#12-現況進度2026-07-24-主頁-rate-計算語意修正-v11)
 
 ---
 
@@ -963,3 +964,33 @@ v10 snapshot viewer 載入 archive DB 時，圖例只能用預設 `Ch01 ~ Ch20`�
 **設計決策（避免備份膨脹）**：
 alias 全等於 `default_alias()` 時就**不寫實際值**，只標記 `null`。
 理由：歸檔頻率受「清除前歸檔」(v5) 觸發，量大時 .meta.json 寫滿 alias 會比 .db 還大。
+
+
+## 12. 現況進度（2026-07-24 主頁 rate 計算語意修正 v11）
+
+### 12.1 v11 — B1 語意：取 SQLite 視窗內「最舊」與「最新」差 / since_minutes
+
+**使用者回饋**：「主頁的速率計算不正確，F 顯示 0.091/1hr 但實際明顯大於計算結果」。
+
+**根因**：
+1. `compute_rate_from_ring` 取 ring buffer 內**首末實際 dt** 當分母（不是視窗分鐘數）→ 若 ring 剛啟動，視窗 1hr 但實際經過只有 58 min → 分母偏小 → 數值偏大
+2. ring buffer 上限 720 筆（10s/筆 ≈ 2hr），視窗 > 2hr 就 silently 沒資料
+3. 表頭寫 `°C/1hr` 卻回傳 `°C/min` 數字，未做單位換算（這項保留給 v11.x 處理）
+
+**修法**：
+1. `compute_rate_from_ring` → `compute_rate_from_db`：來源改成 `storage.query_recent()`，ring 不再用
+2. 計算式簡化：`rate = (新值 - 舊值) / since_minutes`，分母固定 = 使用者選的視窗分鐘數
+3. `compute_avg_from_db` 同樣改用 SQLite
+4. 視窗內不足 2 筆：仍以「視窗內最舊那筆」當起點（不要硬傳 None）→ 剛開機的使用者也能看到速率
+5. 兩處呼叫端同步修正（poller emit、`/api/latest`）
+
+**驗證**：`tests/test_rate_v11_repro.py` 灌入使用者提供的 CSV（58 筆 08:48~09:46）跑全部視窗組合：
+- 60min F = 0.0917（與畫面顯示一致）
+- 5min F = -0.02（最 5 分鐘持平）
+- 30min F = +0.03
+- 600min F = 0.0092（超長視窗仍出值）
+- 空 station => None
+
+**未決**：
+- 表頭「°C/1hr」其實是「每分鐘變化 × 視窗分鐘」來的視覺謊言；下一步該改寫表頭顯示為「°C/{視窗}」，列為 v11.x 的次要 TODO
+- 由於視窗 1hr 等於「分鐘變化率」，若使用者用「°C/1hr」型話語，表中數字看起來偏小、但「5 min」視窗會看起來偏大；這算是 v11 給使用者的語意校正期

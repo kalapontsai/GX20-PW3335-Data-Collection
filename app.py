@@ -557,6 +557,60 @@ def compute_avg_from_ring(station: str, since_minutes: int, point_index: int) ->
     return round(sum(vals) / len(vals), 2)
 
 
+def compute_rate_from_db(station: str, since_minutes: int, point_index: int) -> Optional[float]:
+    """B1 語意（v11）：視窗內「最舊 + 最新」差 / since_minutes。
+
+    來源 = SQLite（query_recent），不走 ring buffer，原因:
+    - ring 上限 720 筆(10s/筆 × 720 ≈ 2hr) → 視窗 > 2hr 就 silently 沒有資料。
+    - SQLite 有 idx_samples_ts 索引，1hr 視窗約 360 筆，SSD 上 <1ms。
+
+    規則：
+    1. 視窗內「最舊一筆（第一個有值的 channel 讀數）」減去「最新一筆（最後一個有值的 channel 讀數）」，差除 since_minutes（使用者選的視窗分鐘數，**不是實際 dt**）。
+    2. 視窗內只有 1 筆有值 → 回 0.0（不變就是 0 速率）。
+    3. 視窗內 0 筆有值 → 回 None。
+
+    回傳單位：°C / 分鐘。前端表頭「°C/1hr」是不準的歷史口語，正確描述應該是「°C/{視窗分鐘數}」。
+    """
+    rows = storage.query_recent(station, since_minutes)
+    if not rows:
+        return None
+    col = f"t{point_index+1:02d}"
+    # 視窗內最舊那筆（第一個有值的 channel 讀數）
+    v_old = None
+    for r in rows:
+        v = r.get(col)
+        if v is not None:
+            v_old = v
+            break
+    if v_old is None:
+        return None
+    # 最新一筆 = DB 倒數第一個有值（避免最新筆剛好 channel 為 None 時向前回溯）
+    v_new = None
+    for r in reversed(rows):
+        v = r.get(col)
+        if v is not None:
+            v_new = v
+            break
+    if v_new is None:
+        return None
+    # 分母固定 = since_minettes（使用者選的視窗分鐘數）。視窗不足時仍以「最舊那筆」起算，不要硬傳 None。
+    if v_old == v_new:
+        return 0.0
+    return round((v_new - v_old) / since_minutes, 4)
+
+
+def compute_avg_from_db(station: str, since_minutes: int, point_index: int) -> Optional[float]:
+    """視窗內全部取樣做算術平均（語意固定 = 視窗內所有取樣平均）。"""
+    rows = storage.query_recent(station, since_minutes)
+    if not rows:
+        return None
+    col = f"t{point_index+1:02d}"
+    vals = [r.get(col) for r in rows if r.get(col) is not None]
+    if not vals:
+        return None
+    return round(sum(vals) / len(vals), 2)
+
+
 # ---------- Debug 輔助：把樣本簡化成可讀字串 ----------
 
 def _fmt_temps(temps: List[Optional[float]]) -> str:
@@ -691,8 +745,8 @@ def poller() -> None:
 
             for station, temps in data.items():
                 try:
-                    rates = [compute_rate_from_ring(station, rate_window, i) for i in range(20)]
-                    avgs  = [compute_avg_from_ring(station, avg_window, i)  for i in range(20)]
+                    rates = [compute_rate_from_db(station, rate_window, i) for i in range(20)]
+                    avgs  = [compute_avg_from_db(station, avg_window, i)  for i in range(20)]
                     # v7：取 ring 最後一筆的 (v, i, w) 一起推
                     rb_last = state["ring"][station][-1] if state["ring"][station] else None
                     pw_payload = {
@@ -886,8 +940,8 @@ def api_latest(station: str):
     rate_window = int(s.get("rate_window_min", config.DEFAULT_RATE_WINDOW_MIN))
     avg_window = int(s.get("avg_window_min", config.DEFAULT_AVG_WINDOW_MIN))
     temps = [r.get(f"t{i+1:02d}") for i in range(20)]
-    rates = [compute_rate_from_ring(station, rate_window, i) for i in range(20)]
-    avgs  = [compute_avg_from_ring(station, avg_window,  i) for i in range(20)]
+    rates = [compute_rate_from_db(station, rate_window, i) for i in range(20)]
+    avgs  = [compute_avg_from_db(station, avg_window,  i) for i in range(20)]
     # v7：電力值來自該 row 的 v/i/w 欄
     pw_payload = {
         "v": r.get("v"),
