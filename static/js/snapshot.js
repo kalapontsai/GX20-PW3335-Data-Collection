@@ -278,10 +278,15 @@
     state.fieldOrder = fields;
     state.visibleFields = new Set(fields);
 
-    // 原始 X 軸範圍（從溫度第一筆/最後一筆拿，或 fallback 到電力）
-    const refDs = tempDatasets[0] || pwDatasets[0];
-    const xMin = refDs.data[0]?.x;
-    const xMax = refDs.data[refDs.data.length - 1]?.x;
+    // v10.1.6：原始 X 軸範圍改用 rawRows[0] / rawRows[last] 的 ts
+    // 原因：原算法 refDs.data[0]?.x 是「T01 溫度」dataset 第一筆 ts，
+    //       如果 rawRows 首/末筆的 T01 是 NULL（會被 filter 掉），
+    //       refDs.data 首/末 ts 就跟真實 rawRows 不同 → 溫度/電力 X 軸起點終點差幾分鐘不對齊
+    // 修法：直接用 rawRows 第一筆/最後一筆的 ts 算 xMin/xMax（兩邊 chart 共用、保證對齊）
+    const firstRow = state.rawRows[0];
+    const lastRow  = state.rawRows[state.rawRows.length - 1];
+    const xMin = new Date(firstRow.ts).getTime();
+    const xMax = new Date(lastRow.ts).getTime();
     state.xMinOrig = xMin;
     state.xMaxOrig = xMax;
     state.xMin = xMin;
@@ -382,8 +387,8 @@
               position: "left",
               min: 0,
               max: powerMax,
-              ticks: { color: c.text },
-              grid:  { color: c.grid },
+              ticks: { color: c.text, display: false },  // v10.1.6：隱藏 yI 軸刻度數字（避免跟 yV 0~1.0 視覺重複）
+              grid:  { color: c.grid },  // grid 保留（給 I 曲線視覺參考）
               title: { display: true, text: "I (A)", color: c.text },
             },
             yW: {
