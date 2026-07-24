@@ -660,7 +660,7 @@ body.cursor-mode .chart-temp { flex: 1 1 0; }
 
 /* v10.x：備份當下的備註文字 */
 .archive-note {
-  margin-left: auto;
+  /* v10.1.3：移除 margin-left: auto（不推到右邊），改用 min-width 撐滿 20 字視覺寬度 */
   padding: 4px 10px;
   background: var(--surface-2);
   border: 1px solid var(--border);
@@ -668,18 +668,14 @@ body.cursor-mode .chart-temp { flex: 1 1 0; }
   font-size: 13px;
   color: var(--text);
   font-style: italic;
-  /* v10.1.2：拉寬到能完整顯示 20 個中文字（13px 字 ~18px 寬，20 字 ≈ 360px，加 padding/border 約 480px） */
+  /* min-width 對應「20 個中文字 + padding/border」：13px 字 ~18px 寬 → 360px 內容 + 22px padding/border ≈ 382px */
+  min-width: 380px;
   max-width: 480px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.archive-note::before {
-  content: "備註：";
-  color: var(--text-dim);
-  font-style: normal;
-  margin-right: 4px;
-}
+/* v10.1.3：移除「備註：」前綴（使用者主觀判斷不需要） */
 .swatch {
   display: inline-block;
   width: 10px;
