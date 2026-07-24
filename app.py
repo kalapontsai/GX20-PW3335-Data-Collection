@@ -287,7 +287,7 @@ def load_settings() -> dict:
                 merged_notes[st] = ""
         out["notes"] = merged_notes
 
-    # v7：pw3335 = {port, hosts, remote, colors}
+    # v10.2：pw3335 = {port, hosts, colors}（拿掉 remote）
     pw_raw = config.from_json(raw.get("pw3335"), default=defaults["pw3335"])
     if isinstance(pw_raw, dict):
         merged_pw = dict(defaults["pw3335"])
@@ -303,12 +303,6 @@ def load_settings() -> dict:
                 v = hosts_in.get(st)
                 if isinstance(v, str) and v.strip():
                     merged_pw["hosts"][st] = v.strip()
-        # remote
-        remote_in = pw_raw.get("remote")
-        if isinstance(remote_in, dict):
-            for st in STATIONS:
-                if st in remote_in:
-                    merged_pw["remote"][st] = bool(remote_in[st])
         # colors
         colors_in = pw_raw.get("colors")
         if isinstance(colors_in, dict):
@@ -401,7 +395,7 @@ def save_settings(patch: dict) -> None:
                     existing[st] = new_st
             storage.set_setting("pw_axis", config.to_json(existing))
         elif k == "pw3335" and isinstance(v, dict):
-            # v7：pw3335 = {port, hosts, remote, colors}
+            # v10.2：pw3335 = {port, hosts, colors}（拿掉 remote）
             existing_raw = storage.get_setting("pw3335")
             existing = config.from_json(existing_raw, default=config.default_settings()["pw3335"])
             if not isinstance(existing, dict):
@@ -419,13 +413,6 @@ def save_settings(patch: dict) -> None:
                 for st, ip in hosts_in.items():
                     if st in STATIONS and isinstance(ip, str) and ip.strip():
                         existing["hosts"][st] = ip.strip()
-            # remote
-            remote_in = v.get("remote")
-            if isinstance(remote_in, dict):
-                existing.setdefault("remote", {})
-                for st, on in remote_in.items():
-                    if st in STATIONS:
-                        existing["remote"][st] = bool(on)
             # colors
             colors_in = v.get("colors")
             if isinstance(colors_in, dict):
@@ -678,42 +665,37 @@ def poller() -> None:
                     log.warning("[round #%d] %s 寫入 SQLite 失敗（不連累其他工位）: %s",
                                 round_no, station, e)
 
-            # v7：拉取 PW3335（6 工位）
-            # 規則：
-            #   - remote=False → 該工位以 (0, 0, 0) 寫入（依使用者需求）
-            #   - remote=True 且連線失敗 → 該工位以 (0, 0, 0) 寫入，標記 pw_connected[st]=False
-            #   - remote=True 且成功 → 用實際值寫入
-            # 一輪失敗不連累其他工位
+            # v10.2：拉取 PW3335（6 工位一律 fetch）
+            # 規則（v10.2 拿掉舊的 `remote` 開關）：
+            #   - 全部 6 工位 → fetch_one_station(host, port)
+            #   - 連線成功 → 用實際值寫入（V/I/W 可能為 0，機器關機是正常）
+            #   - 連線失敗 / IP 未設 → 寫 0 + pw_connected[st]=False + 對應 error message
+            # 一輪失敗不連累其他工位（容錯級「同步」）
             pw_settings = s.get("pw3335", {})
             pw_port = int(pw_settings.get("port", DEFAULT_PW3335_PORT))
             pw_hosts = pw_settings.get("hosts", {})
-            pw_remote = pw_settings.get("remote", {})
             for station in STATIONS:
-                if not pw_remote.get(station, False):
-                    # 未啟用 → 寫 0
-                    v_val, i_val, w_val, ok = 0.0, 0.0, 0.0, True
+                host = pw_hosts.get(station, "")
+                if not host:
+                    v_val, i_val, w_val, ok = 0.0, 0.0, 0.0, False
+                    err_msg = f"未設定 IP（host 空字串）"
+                    log.warning("[round #%d] %s PW3335: %s", round_no, station, err_msg)
+                    with state["lock"]:
+                        state["pw_connected"][station] = False
+                        state["pw_last_error"][station] = err_msg
                 else:
-                    host = pw_hosts.get(station, "")
-                    if not host:
-                        v_val, i_val, w_val, ok = 0.0, 0.0, 0.0, False
-                        err_msg = f"未設定 IP（host 空字串）"
-                        log.warning("[round #%d] %s PW3335: %s", round_no, station, err_msg)
-                        with state["lock"]:
-                            state["pw_connected"][station] = False
-                            state["pw_last_error"][station] = err_msg
-                    else:
-                        v_val, i_val, w_val, ok = fetch_one_station(host, pw_port)
-                        with state["lock"]:
-                            if ok:
-                                state["pw_connected"][station] = True
-                                state["pw_last_error"][station] = None
-                                state["pw_last_vip"][station] = (v_val, i_val, w_val)
-                            else:
-                                state["pw_connected"][station] = False
-                                state["pw_last_error"][station] = "通訊失敗（詳見 app.log）"
+                    v_val, i_val, w_val, ok = fetch_one_station(host, pw_port)
+                    with state["lock"]:
                         if ok:
-                            log.debug("[round #%d] %s PW3335 %s:%d → V=%.2f I=%.4f W=%.2f",
-                                      round_no, station, host, pw_port, v_val, i_val, w_val)
+                            state["pw_connected"][station] = True
+                            state["pw_last_error"][station] = None
+                            state["pw_last_vip"][station] = (v_val, i_val, w_val)
+                        else:
+                            state["pw_connected"][station] = False
+                            state["pw_last_error"][station] = "通訊失敗（詳見 app.log）"
+                    if ok:
+                        log.debug("[round #%d] %s PW3335 %s:%d → V=%.2f I=%.4f W=%.2f",
+                                  round_no, station, host, pw_port, v_val, i_val, w_val)
                 # 把電力值併進 ring buffer 的最後一筆
                 try:
                     rb = state["ring"][station]
@@ -974,20 +956,18 @@ def api_connection():
 @app.route("/api/pw_connection")
 def api_pw_connection():
     """
-    v7：回傳 6 工位 PW3335 連線狀態。
-    用於主畫面右上角顯示（若有任一工位 enabled 但 disconnected 時高亮）。
-    結構：{station: {remote, connected, host, last_error, last_vip:{v,i,w}}, ...}
+    v10.2：回傳 6 工位 PW3335 連線狀態。
+    變更：拿掉 `remote` 欄位（v10.2 取消 PW3335 開關）。
+    結構：{station: {connected, host, last_error, last_vip:{v,i,w}}, ...}
     """
     s = load_settings()
     pw = s.get("pw3335", {})
     hosts = pw.get("hosts", {})
-    remote = pw.get("remote", {})
     out = {}
     with state["lock"]:
         for st in STATIONS:
             v, i, w = state["pw_last_vip"].get(st, (None, None, None))
             out[st] = {
-                "remote":     bool(remote.get(st, False)),
                 "connected":  bool(state["pw_connected"].get(st, False)),
                 "host":       hosts.get(st, ""),
                 "last_error": state["pw_last_error"].get(st),

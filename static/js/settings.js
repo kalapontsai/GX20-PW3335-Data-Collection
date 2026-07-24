@@ -369,10 +369,10 @@ window.addEventListener("DOMContentLoaded", init);
 
 function renderPw3335() {
   const settings = GX20State.settings;
-  const pw = settings.pw3335 || { port: 3300, hosts: {}, remote: {}, colors: {} };
+  const pw = settings.pw3335 || { port: 3300, hosts: {}, colors: {} };
   // port
   document.getElementById("pw3335_port").value = pw.port || 3300;
-  // 6 工位 IP + 啟用
+  // 6 工位 IP（v10.2：拿掉「啟用」checkbox）
   const grid = document.getElementById("pwGrid");
   grid.innerHTML = "";
   STATIONS.forEach(s => {
@@ -392,24 +392,8 @@ function renderPw3335() {
       hosts[s] = ip.value.trim();
       GX20State.update("pw3335", Object.assign({}, cur, { hosts }));
     });
-    const wrap = document.createElement("label");
-    wrap.className = "pw-remote-wrap";
-    const chk = document.createElement("input");
-    chk.type = "checkbox";
-    chk.checked = !!(pw.remote && pw.remote[s]);
-    chk.addEventListener("change", () => {
-      const cur = GX20State.settings.pw3335 || {};
-      const remote = Object.assign({}, (cur.remote || {}));
-      remote[s] = !!chk.checked;
-      GX20State.update("pw3335", Object.assign({}, cur, { remote }));
-    });
-    wrap.appendChild(chk);
-    const wrapTxt = document.createElement("span");
-    wrapTxt.textContent = "啟用";
-    wrap.appendChild(wrapTxt);
     row.appendChild(lab);
     row.appendChild(ip);
-    row.appendChild(wrap);
     grid.appendChild(row);
   });
   // 3 個電力線顏色

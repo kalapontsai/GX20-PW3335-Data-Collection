@@ -275,7 +275,7 @@ async function refreshConnStatus() {
   }
 }
 
-// v7：拉 6 工位 PW3335 連線狀態，更新右側 badge
+// v10.2：拉 6 工位 PW3335 連線狀態，更新右側 badge（拿掉「未啟用」路徑）
 async function refreshPwConnStatus() {
   try {
     const r = await fetch("/api/pw_connection");
@@ -286,11 +286,7 @@ async function refreshPwConnStatus() {
     const badge = document.getElementById("pwConnBadge");
     if (!badge) return;
     badge.classList.remove("on", "off", "disabled");
-    if (!st.remote) {
-      badge.classList.add("disabled");
-      badge.textContent = "未啟用";
-      badge.title = `PW3335 連線未啟用（設定頁可開啟）`;
-    } else if (st.connected) {
+    if (st.connected) {
       badge.classList.add("on");
       badge.textContent = "已連線";
       badge.title = `PW3335 ${st.host} 已連線\nV=${fmt(st.last_vip.v,2)} I=${fmt(st.last_vip.i,3)} W=${fmt(st.last_vip.w,2)}`;

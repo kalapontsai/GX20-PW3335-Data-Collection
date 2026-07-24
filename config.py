@@ -90,18 +90,22 @@ def default_y_axis() -> dict:
 
 def default_pw3335() -> dict:
     """PW3335 整體設定。
-    結構：
+    v10.2：取消 per-station `remote` 開關。理由：
+      1. OTA 推送後 app.py 重啟時只看 `pw_remote`，預設全 False → 該工位永遠寫 0
+         → 重新啟動到下次手動開啟這段時間電力資料完全缺漏。
+      2. 6 工位都裝了 PW3335，「未啟用」狀態實務上不存在。
+      3. 「機器關機」會讓 V/I/W 為 0，不該被當成「未啟用」錯誤。
+    結構（v10.2 拿掉 remote）：
       {
         "port":   int,                    # 6 台共用 TCP port
         "hosts":  {station: ip, ...},     # 每工位的 PW3335 IP
-        "remote": {station: bool, ...},   # 每工位是否啟用 (False=寫 0)
         "colors": {"V": "#...", "I": "#...", "W": "#..."},  # 電力線顏色
       }
+    規則：app.py 對 6 工位一律 fetch_one_station；連線失敗 → 寫 0 + pw_connected=False。
     """
     return {
         "port":   DEFAULT_PW3335_PORT,
         "hosts":  {s: DEFAULT_PW3335_HOSTS[s] for s in STATIONS},
-        "remote": {s: False for s in STATIONS},  # 預設全關，與 desktop Debug_mode 對齊
         "colors": dict(DEFAULT_PW_COLORS),
     }
 
