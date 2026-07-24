@@ -342,6 +342,20 @@
     // ---- 下圖：電力（V/A/W 三軸，左 I/A、左 offset W、右 V） ----
     if (pwDatasets.length > 0) {
       const ctxP = pwCanvas.getContext("2d");
+
+      // v10.1.5：三軸 0~powerMax 對齊
+      // - powerMax = max(iPeak, wPeak/100) * 1.1（沿用 v8.5 邏輯，W/100 跟 I 同單位）
+      // - yI: 0~powerMax、yW: 0~powerMax*100、yV: 0~powerMax*100
+      //   → 三軸的 0 都對齊圖底、max 都對齊圖頂（Y 像素位置一致）
+      // - 0 點對齊視覺上讓三軸讀數同步（I=A、W=100W、V=110V 都在 Y 90%+ 位置）
+      let iPeak = 0, wPeak = 0, vPeak = 0;
+      for (const r of state.rawRows) {
+        if (typeof r.i === "number" && r.i > iPeak) iPeak = r.i;
+        if (typeof r.w === "number" && r.w > wPeak) wPeak = r.w;
+        if (typeof r.v === "number" && r.v > vPeak) vPeak = r.v;
+      }
+      const powerMax = Math.max(iPeak, wPeak / 100, 0.1) * 1.1;
+
       state.pwChart = new Chart(ctxP, {
         type: "line",
         data: { datasets: pwDatasets },
@@ -366,6 +380,8 @@
             yI: {
               type: "linear",
               position: "left",
+              min: 0,
+              max: powerMax,
               ticks: { color: c.text },
               grid:  { color: c.grid },
               title: { display: true, text: "I (A)", color: c.text },
@@ -374,6 +390,8 @@
               type: "linear",
               position: "left",
               offset: true,
+              min: 0,
+              max: powerMax * 100,
               ticks: { color: c.text },
               grid:  { drawOnChartArea: false },
               title: { display: true, text: "W (W)", color: c.text },
@@ -381,6 +399,8 @@
             yV: {
               type: "linear",
               position: "right",
+              min: 0,
+              max: powerMax * 100,
               ticks: { color: c.text },
               grid:  { drawOnChartArea: false },
               title: { display: true, text: "V (V)", color: c.text },
