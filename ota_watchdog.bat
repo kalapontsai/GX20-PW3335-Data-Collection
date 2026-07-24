@@ -36,29 +36,67 @@ REM Setup log dir
 if not exist logs mkdir logs
 set LOGFILE=logs\watchdog.log
 
-REM ----- Hard requirement: pythonw.exe on PATH -----
-REM 正式環境不再容忍 python.exe（會跳 console 視窗）。
-REM pythonw.exe 找不到就直接 fatal，不要降級用 python.exe。
-where pythonw >nul 2>&1
-if %ERRORLEVEL% NEQ 0 (
-    echo [%date% %time%] [FATAL] pythonw.exe not found in PATH. OTA host requires Python on PATH (含 pythonw.exe).
-    echo [%date% %time%] [FATAL] pythonw.exe not found in PATH. OTA host requires Python on PATH (含 pythonw.exe). >> %LOGFILE%
-    pause
-    exit /b 1
+REM ----- Hard requirement: pythonw.exe (v2.4, 2026-07-24) -----
+REM Strategy (in order):
+REM   1) where pythonw (PATH lookup)
+REM   2) where python  -> use its directory + \pythonw.exe
+REM      (python.exe is usually on PATH; pythonw is in same dir)
+REM   3) Fixed known install locations (no %LocalAppData% / %ProgramFiles%)
+REM      because some OTA hosts have those env vars unset or restricted.
+REM   4) FATAL if none found.
+REM Do NOT downgrade to python.exe (pythonw = no console window).
+set PYTHONW_EXE=
+REM Step 1: where pythonw
+for /f "delims=" %%i in ('where pythonw 2^>nul') do (
+    if not defined PYTHONW_EXE set PYTHONW_EXE=%%i
 )
+if defined PYTHONW_EXE goto :PYW_OK
+REM Step 2: where python -> derive pythonw from same dir
+for /f "delims=" %%i in ('where python 2^>nul') do (
+    if not defined PYTHONW_EXE (
+        set "PYTHONW_DIR=%%~dpi"
+        if exist "%%~dpi\pythonw.exe" set "PYTHONW_EXE=%%~dpi\pythonw.exe"
+    )
+)
+if defined PYTHONW_EXE goto :PYW_OK
+REM Step 3: fixed absolute paths (community / store installer defaults)
+REM 3a: per-user store installer (most common on modern Win10/11)
+if exist "C:\Users\USER\AppData\Local\Programs\Python\Python313\pythonw.exe" set PYTHONW_EXE=C:\Users\USER\AppData\Local\Programs\Python\Python313\pythonw.exe
+if defined PYTHONW_EXE goto :PYW_OK
+if exist "C:\Users\USER\AppData\Local\Programs\Python\Python312\pythonw.exe" set PYTHONW_EXE=C:\Users\USER\AppData\Local\Programs\Python\Python312\pythonw.exe
+if defined PYTHONW_EXE goto :PYW_OK
+if exist "C:\Users\USER\AppData\Local\Programs\Python\Python311\pythonw.exe" set PYTHONW_EXE=C:\Users\USER\AppData\Local\Programs\Python\Python311\pythonw.exe
+if defined PYTHONW_EXE goto :PYW_OK
+if exist "C:\Users\USER\AppData\Local\Programs\Python\Python310\pythonw.exe" set PYTHONW_EXE=C:\Users\USER\AppData\Local\Programs\Python\Python310\pythonw.exe
+if defined PYTHONW_EXE goto :PYW_OK
+REM 3b: system-wide installer defaults
+if exist "C:\Program Files\Python313\pythonw.exe" set PYTHONW_EXE=C:\Program Files\Python313\pythonw.exe
+if defined PYTHONW_EXE goto :PYW_OK
+if exist "C:\Program Files\Python312\pythonw.exe" set PYTHONW_EXE=C:\Program Files\Python312\pythonw.exe
+if defined PYTHONW_EXE goto :PYW_OK
+if exist "C:\Python313\pythonw.exe" set PYTHONW_EXE=C:\Python313\pythonw.exe
+if defined PYTHONW_EXE goto :PYW_OK
+REM No pythonw found
+echo [%date% %time%] [FATAL] pythonw.exe not found anywhere we looked.
+echo [%date% %time%] [FATAL] pythonw.exe not found anywhere we looked. >> %LOGFILE%
+echo [%date% %time%] [DEBUG] checked: PATH, where python, C:\Users\USER\AppData\Local\Programs\Python\Python3{10-13}, C:\Program Files\Python3{12,13}, C:\Python313
+echo [%date% %time%] [DEBUG] checked: PATH, where python, C:\Users\USER\AppData\Local\Programs\Python\Python3{10-13}, C:\Program Files\Python3{12,13}, C:\Python313 >> %LOGFILE%
+pause
+exit /b 1
+:PYW_OK
 
-echo [%date% %time%] [INFO] Using pythonw: %ProgramFiles%\Python313\pythonw.exe ^(PATH lookup OK^)
-echo [%date% %time%] [INFO] Using pythonw (PATH lookup OK) >> %LOGFILE%
+echo [%date% %time%] [INFO] Using pythonw: %PYTHONW_EXE%
+echo [%date% %time%] [INFO] Using pythonw: %PYTHONW_EXE% >> %LOGFILE%
 
 setlocal enabledelayedexpansion
 set MAX_FAILS=5
 set FAIL_COUNT=0
 
 :LOOP
-echo [%date% %time%] [INFO] Watch dog: starting pythonw app.py ...
-echo [%date% %time%] [INFO] Watch dog: starting pythonw app.py ... >> %LOGFILE%
+echo [%date% %time%] [INFO] Watch dog: starting %PYTHONW_EXE% app.py ...
+echo [%date% %time%] [INFO] Watch dog: starting %PYTHONW_EXE% app.py ... >> %LOGFILE%
 
-pythonw app.py
+"%PYTHONW_EXE%" app.py
 set EXITCODE=%ERRORLEVEL%
 echo [%date% %time%] [INFO] pythonw app.py exited, code=%EXITCODE%
 echo [%date% %time%] [INFO] pythonw app.py exited, code=%EXITCODE% >> %LOGFILE%
