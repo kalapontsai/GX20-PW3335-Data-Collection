@@ -96,9 +96,13 @@
       if (v === null || v === undefined || (typeof v === "number" && !isFinite(v))) {
         cell.textContent = "—";
         cell.classList.add("none");
+        cell.classList.remove("neg");
       } else {
         cell.textContent = fmtTemp(v);
         cell.classList.remove("none");
+        // v10.3 r2：負值藍色提示
+        if (v < 0) cell.classList.add("neg");
+        else cell.classList.remove("neg");
       }
     });
   }

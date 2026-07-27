@@ -43,7 +43,7 @@
   }
   header.bar select {
     flex: 1; min-width: 0;
-    font-size: 15px;
+    font-size: 17px;             /* +2（15→17）— v10.3 r2 */
     padding: 6px 8px;
     border: 1px solid var(--row-line);
     border-radius: 6px;
@@ -53,7 +53,7 @@
   }
   /* 連線狀態（極小、貼右上） */
   header.bar .conn {
-    font-size: 12px; color: var(--muted);
+    font-size: 14px; color: var(--muted);   /* +2（12→14）— v10.3 r2 */
     display: flex; align-items: center; gap: 4px;
     white-space: nowrap;
   }
@@ -76,9 +76,9 @@
   thead th {
     background: var(--header-bg);
     border-bottom: 1px solid var(--row-line);
-    padding: 12px 14px;
+    padding: 14px 16px;
     text-align: center;
-    font-size: 16px;
+    font-size: 18px;             /* +2（16→18）— v10.3 r2 */
     font-weight: 500;            /* medium，圖感 */
     color: #1a1a1a;
   }
@@ -86,13 +86,13 @@
   thead th:nth-child(2) { width: 45%; }
 
   tbody td {
-    padding: 12px 14px;          /* 圖 cell 約 12px */
+    padding: 14px 16px;          /* +2，配合字體放大 */
     border-bottom: 1px solid var(--row-line);
     text-align: center;          /* 圖兩欄皆置中 */
     vertical-align: middle;
-    font-size: 15px;             /* 圖 ~15-16px */
+    font-size: 17px;             /* +2（15→17）— v10.3 r2 */
     line-height: 1.4;
-    min-height: 44px;            /* 圖行高 ~44-48px */
+    min-height: 48px;            /* +4，配合字體放大 */
   }
   tbody td.ch-name {
     font-weight: 500;            /* T01–T10 稍粗 */
@@ -105,10 +105,12 @@
   }
   tbody td.ch-val.none { color: var(--muted); }  /* 空值 → 灰色 "—" */
   /* 圖例空值留白（無 placeholder）；用 — 但調淡色讓不搶眼 */
+  /* v10.3 r2：負值藍色提示（製冷裝置低溫是關鍵訊號）*/
+  tbody td.ch-val.neg { color: #0969da; font-weight: 500; }
 
   footer {
     padding: 10px 14px;
-    font-size: 12px;
+    font-size: 14px;             /* +2（12→14）— v10.3 r2 */
     color: var(--muted);
     text-align: center;
     border-top: 1px solid var(--row-line);
