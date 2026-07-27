@@ -813,6 +813,21 @@ def settings_page():
     )
 
 
+@app.route("/mobile")
+def mobile_page():
+    """v10.3: 攜帶式溫度監測頁（簡式版面）。
+
+    獨立頁面，桌機/手機皆同版面。
+    只顯示工位切換 + 20 個 channel 讀值表，無圖表/設定/游標。
+    資料源：socket.io new_sample 事件（與主頁一致），不輪詢。
+    """
+    return render_template(
+        "mobile.html",
+        stations=STATIONS,
+        points_per_station=POINTS_PER_STATION,
+    )
+
+
 # v8.1.2：設定變更權限鎖本機
 # 決策：只有 OTA 本機 (127.0.0.1) 可變更設定，遠端瀏覽器只能讀。
 # 原因：v8.1.1 migrate legacy session 會「意外覆寫 server 設定」（跨工位污染），

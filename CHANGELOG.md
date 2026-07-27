@@ -22,6 +22,7 @@
 12. [現況進度（2026-07-24 主頁 rate 計算語意修正 v11）](#12-現況進度2026-07-24-主頁-rate-計算語意修正-v11)
 13. [現況進度（2026-07-24 snapshot 統計時區 bug v10.1.1）](#13-現況進度2026-07-24-snapshot-統計時區-bug-v1011)
 14. [現況進度（2026-07-24 取消 PW3335 『啟用』開關 v10.2）](#14-現況進度2026-07-24-取消-pw3335-啟用-開關-v102)
+15. [現況進度（2026-07-27 行動簡式頁面 /mobile v10.3）](#15-現況進度2026-07-27-行動簡式頁面-mobile-v103)
 
 ---
 
@@ -1075,3 +1076,52 @@ alias 全等於 `default_alias()` 時就**不寫實際值**，只標記 `null`�
 - 「設計時的開關」跟「實際部署的場景」對不上時，**預設值的選擇**很重要：「預設關」對開發安全但對正式環境是死亡預設；「預設開」對正式環境安全但對開發可能誤觸
 - 這次選「拿掉開關」是因為「6 工位都有電力計」是 fixed 場景，不會變動 → 預設值策略本身就是設計債
 - 如果未來某工位暫時不裝（例如第 6 工位硬體還沒到），用 `hosts[<工位>] = ""` 即可觸發「未設定 IP」路徑，**不需要再開關**
+
+---
+
+## 15. 現況進度（2026-07-27 行動簡式頁面 /mobile v10.3）
+
+**背景**：
+
+使用者要求「攜帶式溫度監測」獨立頁面。原本考慮用 `index.html` 做 RWD（手機/桌機不同版面），但大大指示「桌機瀏覽也同樣顯示簡單版面」，因此**不做響應式切換**，而是開一個獨立 route。
+
+**決策**：
+
+| 項目 | 決定 |
+|---|---|
+| 路徑 | `/mobile` |
+| 內容 | 只 2 樣：工位下拉 + 20 個 channel 讀值表 |
+| 字體大小 | 預設就要夠大（手機可閱讀程度），不做調整 UI |
+| 入口 | 完全獨立，**不在主頁 / 加連結**，使用者自己 bookmark |
+| 資料源 | socket.io `new_sample`（與主頁同源，不輪詢） |
+| 設定來源 | `GET /api/settings` 一次拿 `ch_alias` + `ch_visibility` |
+| 首頁 / 切工位 fallback | `GET /api/latest/<station>` |
+
+**新增檔案**：
+
+- `templates/mobile.html` — 簡式版面（inline CSS，獨立配色避免污染主 style.css）
+- `static/js/mobile.js` — 完全獨立，不引用 `storage.js` / `main.js`
+
+**app.py 變更**：
+
+- 新增 `@app.route("/mobile")` → `render_template("mobile.html", stations=STATIONS, points_per_station=POINTS_PER_STATION)`
+
+**不做的事**：
+
+- 不在 `/`（index.html）加「手機模式」連結（使用者自己 bookmark）
+- 不輪詢 `/api/latest`（socket 已 10s 推一次，省頻寬）
+- 不寫本地字體大小 / 排序偏好（**沒有任何寫 server 的端點**，符合 v8.1.2 遠端鎖定精神）
+
+**視覺重點**：
+
+- 字體：channel 名稱 1.1rem、讀值 1.6rem（手機模式 1.5rem）
+- 行高 / padding 大（tbody 14px）適合手指觸控
+- `ch_visibility=false` 的 channel → 整列淡化（資料保留、可見但不搶眼）
+- 連線 dot + 時間戳 footer
+- header `position: sticky` → 滾動看下方 channel 時工位下拉仍可切換
+
+**驗證 SOP**：
+
+- `py_compile app.py` 通過
+- 啟動 Flask，`curl -s http://127.0.0.1:5000/mobile` 確認 200 + HTML 含 `id="stationSelect"` 與 `id="readoutTable"`
+- 瀏覽器（手機模式 + 桌機模式各一次）確認版面、字體大小、socket 連線、新資料即時更新
