@@ -9,126 +9,115 @@
 <title>GX20 行動版</title>
 <script src="{{ url_for('static', filename='vendor/socket.io.min.js') }}"></script>
 <style>
-  /* v10.3 mobile 簡式版面：只工位下拉 + channel 讀值表
-     設計原則：
-       - 預設字體就要夠大（手機可閱讀），不提供調整 UI
-       - 桌機/手機同版面，不做響應式切換
-       - 配色跟主頁一致（CSS variables 由 main.js 主題系統設定，
-         但 mobile 獨立頁，用預設亮色避免主題不同步困擾）*/
+  /* v10.3 mobile 簡式版面：依使用者提供之範例圖 layout
+     圖例重點：
+       - 兩欄，欄寬 ~55/45（左欄略寬）
+       - 表頭淡灰底、字稍粗
+       - 資料列兩欄皆置中對齊、字體 ~15-16px
+       - 行高 ~44-48px、cell padding ~12px
+       - 極簡：無 hero / 無多餘強調色
+       - 工位切換必放（圖未顯示但使用者文字要求），採薄一條 sticky header 不搶眼
+  */
   :root {
-    --bg:      #ffffff;
-    --fg:      #1f2328;
-    --muted:   #57606a;
-    --border:  #d0d7de;
-    --hover:   #f6f8fa;
-    --accent:  #0969da;
+    --bg:        #ffffff;
+    --fg:        #000000;
+    --header-bg: #f2f2f2;   /* 表頭底色，照圖 */
+    --row-line:  #e5e5e5;   /* 資料列分隔線 */
+    --muted:     #8a8a8a;   /* 連線狀態 / footer 小字 */
   }
   * { box-sizing: border-box; }
   html, body {
     margin: 0; padding: 0;
     background: var(--bg);
     color: var(--fg);
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang TC",
-                 "Microsoft JhengHei", "Noto Sans TC", sans-serif;
+    font-family: -apple-system, "PingFang TC", "Noto Sans TC", "Microsoft JhengHei", sans-serif;
     -webkit-text-size-adjust: 100%;
   }
-  header {
+  /* 工位切換列：極薄、貼齊表格上沿，不搶表格焦點 */
+  header.bar {
     position: sticky; top: 0; z-index: 10;
     background: var(--bg);
-    border-bottom: 1px solid var(--border);
-    padding: 14px 16px;
-    display: flex; align-items: center; gap: 12px;
+    border-bottom: 1px solid var(--row-line);
+    padding: 8px 12px;
+    display: flex; align-items: center; gap: 10px;
   }
-  header h1 {
-    margin: 0; font-size: 1.15rem; font-weight: 600;
-    white-space: nowrap;
-  }
-  header select {
+  header.bar select {
     flex: 1; min-width: 0;
-    font-size: 1.1rem;
-    padding: 10px 12px;
-    border: 1px solid var(--border);
-    border-radius: 8px;
+    font-size: 15px;
+    padding: 6px 8px;
+    border: 1px solid var(--row-line);
+    border-radius: 6px;
     background: var(--bg);
     color: var(--fg);
+    font-family: inherit;
   }
-  /* 連線指示（小型 dot） */
-  .conn {
-    display: flex; align-items: center; gap: 6px;
-    font-size: 0.85rem; color: var(--muted);
+  /* 連線狀態（極小、貼右上） */
+  header.bar .conn {
+    font-size: 12px; color: var(--muted);
+    display: flex; align-items: center; gap: 4px;
+    white-space: nowrap;
   }
   .dot {
-    width: 10px; height: 10px; border-radius: 50%;
+    width: 8px; height: 8px; border-radius: 50%;
     background: #999;
   }
   .dot.on  { background: #2da44e; }
   .dot.off { background: #cf222e; }
 
+  /* 表格：照圖極簡置中型 */
   main {
     padding: 0;
-    /* 表格內容可能 > 螢幕高度，讓 main 區可滾動；header 固定在上 */
-    overflow-x: auto;
   }
   table {
     width: 100%;
     border-collapse: collapse;
-    font-size: 1.4rem;        /* 讀值字體 — 主要可閱讀元素 */
+    table-layout: fixed;        /* 鎖欄寬 55/45 */
   }
   thead th {
-    position: sticky; top: 0;
-    background: var(--bg);
-    border-bottom: 2px solid var(--border);
-    padding: 12px 12px;
-    text-align: left;
-    font-size: 1rem;
-    font-weight: 600;
-    color: var(--muted);
+    background: var(--header-bg);
+    border-bottom: 1px solid var(--row-line);
+    padding: 12px 14px;
+    text-align: center;
+    font-size: 16px;
+    font-weight: 500;            /* medium，圖感 */
+    color: #1a1a1a;
   }
+  thead th:nth-child(1) { width: 55%; }
+  thead th:nth-child(2) { width: 45%; }
+
   tbody td {
-    padding: 14px 12px;
-    border-bottom: 1px solid var(--border);
+    padding: 12px 14px;          /* 圖 cell 約 12px */
+    border-bottom: 1px solid var(--row-line);
+    text-align: center;          /* 圖兩欄皆置中 */
     vertical-align: middle;
+    font-size: 15px;             /* 圖 ~15-16px */
+    line-height: 1.4;
+    min-height: 44px;            /* 圖行高 ~44-48px */
   }
-  tbody tr:hover { background: var(--hover); }
-  td.ch-name {
-    font-size: 1.1rem;
-    color: var(--muted);
-    width: 30%;
-    white-space: nowrap;
+  tbody td.ch-name {
+    font-weight: 500;            /* T01–T10 稍粗 */
+    color: #1a1a1a;
   }
-  td.ch-val {
-    font-size: 1.6rem;          /* 讀值再大一點 */
-    font-weight: 500;
+  tbody td.ch-val {
+    font-weight: 400;            /* 數字 regular */
+    color: #000;
     font-variant-numeric: tabular-nums;
-    text-align: right;
-    width: 70%;
   }
-  td.ch-val.none { color: var(--muted); font-weight: 400; }
-  /* ch_visibility 停用的 row：淡化但仍顯示（保留資料完整性） */
-  tr.disabled td { color: #b1b1b1; }
-  tr.disabled td.ch-val { font-weight: 400; }
+  tbody td.ch-val.none { color: var(--muted); }  /* 空值 → 灰色 "—" */
+  /* 圖例空值留白（無 placeholder）；用 — 但調淡色讓不搶眼 */
 
   footer {
-    padding: 12px 16px;
-    font-size: 0.85rem;
+    padding: 10px 14px;
+    font-size: 12px;
     color: var(--muted);
     text-align: center;
-    border-top: 1px solid var(--border);
-  }
-  /* 窄螢幕（手機）：縮小 padding、字體稍減 */
-  @media (max-width: 480px) {
-    header { padding: 10px 12px; gap: 8px; }
-    header h1 { font-size: 1rem; }
-    thead th { padding: 10px 10px; }
-    tbody td { padding: 12px 10px; }
-    td.ch-val { font-size: 1.5rem; }
+    border-top: 1px solid var(--row-line);
   }
 </style>
 </head>
 <body>
 
-<header>
-  <h1>GX20</h1>
+<header class="bar">
   <select id="stationSelect" aria-label="工位切換">
     {% for s in stations %}<option value="{{ s }}">{{ s }}</option>{% endfor %}
   </select>
@@ -143,7 +132,7 @@
     <thead>
       <tr>
         <th>channel</th>
-        <th style="text-align:right;">讀值 (°C)</th>
+        <th>讀值 (°C)</th>
       </tr>
     </thead>
     <tbody id="readoutBody">
@@ -156,6 +145,6 @@
   <span id="lastTs">—</span>
 </footer>
 
-<script src="{{ url_for('static', filename='js/mobile.js') }}?v=1"></script>
+<script src="{{ url_for('static', filename='js/mobile.js') }}?v=2"></script>
 </body>
 </html>

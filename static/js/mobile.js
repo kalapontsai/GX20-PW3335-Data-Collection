@@ -65,9 +65,8 @@
       const tr = document.createElement("tr");
       tr.dataset.idx = String(i);
 
-      // visibility: undefined 一律當 true（首次開頁可能還沒拿到完整設定）
-      const isVisible = vis[i] !== false;
-      if (!isVisible) tr.classList.add("disabled");
+      // v10.3 (圖例對齊)：停用頻道不再淡化樣式 — 圖例所有列都是同樣 style
+      // ch_visibility 仍載入給未來使用，但視覺上不區分
 
       const tdName = document.createElement("td");
       tdName.className = "ch-name";
