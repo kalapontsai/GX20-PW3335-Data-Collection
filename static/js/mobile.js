@@ -125,7 +125,9 @@
   async function loadSettings() {
     const r = await fetch("/api/settings");
     const j = await r.json();
-    if (j.ok) settings = j;
+    // /api/settings 沒有 "ok" 欄位（直接 dump settings dict）
+    // 其他 API（/api/latest, /api/channels）才有 "ok"。這裡直接接 body 即可。
+    settings = j;
   }
   async function loadChannelNums() {
     try {
@@ -158,8 +160,10 @@
 
     stationSel.addEventListener("change", () => switchStation(stationSel.value));
 
-    await loadSettings();
-    await loadChannelNums();
+    try { await loadSettings(); }
+    catch (e) { console.error("[mobile] loadSettings failed:", e); }
+    try { await loadChannelNums(); }
+    catch (e) { console.error("[mobile] loadChannelNums failed:", e); }
 
     currentStation = stationSel.value;
     document.title = `[${currentStation}] GX20 行動版`;
