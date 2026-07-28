@@ -193,6 +193,15 @@ const TAB_KEY = "gx20.tab_extra.v1";
  * - disable 主畫面三 select（X軸/速率/平均不能改）
  * 判定依據：GX20State.isLocal（server 在 /api/settings GET response 給 is_local）
  * 注意：server 端 POST /api/settings 也會 403 拒遠端，是雙重保險。
+ *
+ * v10.x 已知遠端 reload 限制（本機修改後，遠端需 reload 才會同步）：
+ * - noteBox / chartXSel / rateSel / avgSel：本機改完後，遠端 memory 內的
+ *   GX20State.settings 是初次 GET 的快照，不會自動重拉；切換工位或 reload 才會更新。
+ * - 工位清單（<select id="stationSel">）：server 端新增/刪除工位後，遠端需 reload
+ *   （目前沒有 socket 推播工位異動）。
+ * 不受 reload 限制的（即時同步）：
+ * - 圖表資料（socket new_sample 推播）
+ * - settingsBtn / clearBtn 顯隱（純前端 is_local 判斷，不涉及 server state）
  */
 function applyRemoteUiLocks() {
   if (GX20State.isLocal) return;  // 本機全開
@@ -202,9 +211,9 @@ function applyRemoteUiLocks() {
   // 跟設定一起鎖遠端，避免按錯連結就把工位資料刪了
   const clearBtn = document.getElementById("clearBtn");
   if (clearBtn) clearBtn.style.display = "none";
-  // v10.x：備註欄跟設定一樣只能本機改（跨瀏覽器可讀但遠端不顯示）
+  // v10.x：備註欄跟設定一樣只能本機改（跨瀏覽器可讀，遠端唯讀不編輯）
   const noteBox = document.getElementById("noteBox");
-  if (noteBox) noteBox.style.display = "none";
+  if (noteBox) noteBox.readOnly = true;
   for (const id of ["chartXSel", "rateSel", "avgSel"]) {
     const s = document.getElementById(id);
     if (s) s.disabled = true;
