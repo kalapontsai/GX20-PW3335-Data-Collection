@@ -4,6 +4,10 @@
 >
 > 6 工位 × 20 接點 = 120 點溫度 + 6 工位 V/I/W 三相電力，每 10 秒取樣一次，**可持續記錄 7 天以上**
 >
+> **v10.3.1** 改版重點：5 個白名單（CORS / 內網寫入 IP / OTA 後台 IP / OTA 路徑 / 副檔名）抽離到 `config/settings.json` 的 `whitelist` 區塊，可在本機 `/settings` 頁面編輯，5 秒內熱載入生效
+>
+> **v10.3** 改版重點：行動簡式頁面 `/mobile`（獨立 route，不在主頁加連結，工位下拉 + 20 channel 讀值表，桌機手機同版面）
+>
 > **v10.1** 改版重點：備註欄 per-station 同步 + 備份 dump alias/note 到 .meta.json
 >
 > **v10** 改版重點：離線瀏覽備份 db 的 `/snapshot` 頁（讀 archive DB 畫圖 + 兩條 x-bar 拖曳 + wheel zoom）

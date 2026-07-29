@@ -1125,3 +1125,98 @@ alias 全等於 `default_alias()` 時就**不寫實際值**，只標記 `null`�
 - `py_compile app.py` 通過
 - 啟動 Flask，`curl -s http://127.0.0.1:5000/mobile` 確認 200 + HTML 含 `id="stationSelect"` 與 `id="readoutTable"`
 - 瀏覽器（手機模式 + 桌機模式各一次）確認版面、字體大小、socket 連線、新資料即時更新
+
+---
+
+## 16. 現況進度（2026-07-29 白名單抽離 + 設定頁編輯支援 v10.3.1）
+
+**背景**：
+
+5 個安全白名單原本 hardcode 在程式碼內：
+- `cors_origins` → `app.py` 的 `_ALLOWED_ORIGINS`（含環境變數 `GX20_ALLOWED_ORIGINS` 覆寫）
+- `remote_write_ips` → `app.py` 的 `REMOTE_WRITE_ALLOWED_IPS = ("127.0.0.1", "::1")`
+- `ota_admin_ips` → `ota.py` 的 `OTA_ALLOWED_IPS`
+- `ota_allowed_targets` → `ota.py` 的 `ALLOWED_TARGETS`（路徑前綴 / 具名檔）
+- `ota_blocked_exts` → `ota.py` 的 `BLOCKED_EXTS`（副檔名黑名單）
+
+每次 LAN 拓樸變動 / 換 IP / 加新工位都要改 code + commit + push OTA。對非工程師使用者不友善。
+
+**決策**：
+
+| 項目 | 決定 |
+|---|---|
+| 儲存位置 | 併進 `config/settings.json` 新增的 `whitelist` 區塊（**不獨立檔**） |
+| 編輯介面 | `/settings` 頁新增「▼ 安全白名單（進階）」折疊區塊，5 個清單 + 重置預設值 |
+| 寫入權限 | 沿用 `POST /api/settings` 的本機鎖（`127.0.0.1` / `::1` only） |
+| 熱載入 | `whitelist.py` 模組每次 `get()` 檢查 settings.json mtime，變動就 reload（5 秒內生效） |
+| OTA 推送 | `config/settings.json` **不加入 OTA 白名單**（避免雙重故障） |
+| 預設值 | 跟 OTA 端原本 hardcode 的內容一致（CORS 含 LAN IP `10.35.31.10:5000`、OTA admin 含 `10.35.32.11`） |
+
+**新增模組**：
+
+- `whitelist.py` — 從 `config/settings.json` 讀 `whitelist` 區塊，提供 `get(key)` / `init()` / `get_status()` / `get_defaults()` API
+  - 檔案 mtime 變動 → 自動熱載入
+  - JSON 解析失敗 → 整份退回 default（log warning，不 crash）
+  - 欄位型別錯誤 → 該欄位退回 default、其他保留
+
+**app.py 變更**：
+
+- 刪除 `_ALLOWED_ORIGINS` hardcode + `GX20_ALLOWED_ORIGINS` 環境變數解析
+- `socketio = SocketIO(app, cors_allowed_origins=_wl_get("cors_origins"), ...)`
+- `REMOTE_WRITE_ALLOWED_IPS = tuple(_wl_get("remote_write_ips"))`
+
+**ota.py 變更**：
+
+- `ALLOWED_TARGETS = tuple(_wl_get("ota_allowed_targets"))`
+- `BLOCKED_EXTS = tuple(_wl_get("ota_blocked_exts"))`
+- `OTA_ALLOWED_IPS = tuple(_wl_get("ota_admin_ips"))`
+
+**templates/settings.html 變更**：
+
+- 新增 `<details>` 折疊區塊「▼ 安全白名單（進階）」
+- 5 個 `<div class="wl-list">` 容器 + 「+ 新增」按鈕
+- 「重置為預設值」按鈕
+- 警告文字「改錯可能會把自己鎖在外面」
+- 對應 CSS：`.wl-row` / `.btn-add` / `.btn-del` / `.btn-secondary`
+
+**static/js/settings.js 變更**：
+
+- 新增 `WHITELIST_KEYS` / `WHITELIST_DEFAULTS` / `_wlRenderRow()` / `renderWhitelist()`
+- 整合進 `GX20State.update("whitelist", {...})`，按保存時隨其他設定一起 POST
+- 預設值跟 `whitelist.py` DEFAULTS 一致（兩邊都要同步）
+
+**config/settings.example.json 變更**：
+
+- 新增 `whitelist` 區塊範例（含 `_comment` 註解）
+
+**部署流程變更**：
+
+- `config/settings.example.json` OTA 推送時**會被白名單擋下**（v8.4+ 設計，OTA ALLOWED_TARGETS 本來就不含 `config/`）
+- 第一次部署後，OTA 端 `config/settings.json` 沒有 `whitelist` 區塊 → `whitelist.py` 退回 default 載入（**功能正常**，但 UI 編輯改的內容不會被持久化，除非手動合併）
+- 部署後**必須手動編輯 OTA 端 `config/settings.json`** 加 whitelist 區塊（或用 git checkout），才能讓 UI 編輯生效
+
+**OTA 推送 SOP 教訓（2026-07-29）**：
+
+| 症狀 | 原因 |
+|---|---|
+| OTA bundle response `whitelist.py → whitelist.py (6245 bytes) saved: ok`，但磁碟上 `Test-Path .\whitelist.py` 回 False | 新模組檔案第一次推送時，OTA 端 atomic_write 跟 watchdog 重啟可能有 race condition，導致 silent failure |
+| 重啟後 watchdog `Start-Process '%~dp0ota_watchdog.bat' -WindowStyle Hidden` 報「找不到檔案」 | 真正原因是 Flask crash（`ModuleNotFoundError: No module named 'whitelist'`），watchdog 找不到活的 Python 進程；PowerShell 包裝層把錯誤訊息誤導成「檔案不存在」 |
+| 解法 | 用 `start_forever.bat` 直接拉 Python（繞過 watchdog 邏輯層）；手動從 WSL 複製缺的檔案 |
+
+**新增 SOP**：
+
+- **OTA bundle 推送新檔案時**：除了看 response `saved: ok`，必須再從 OTA 主機 `Test-Path` 確認檔案真的在磁碟
+- **首次部署新模組時**：預先在 OTA 主機確認 watchdog 流程、或暫時用 `start_forever.bat` 接手，避免重啟鏈中斷
+- **修整計畫（v10.3.1 hotfix）**：watchdog 內錯誤訊息改成「flask process not found」，不要用 PowerShell 預設錯誤訊息誤導
+
+**驗證 SOP**：
+
+- `py_compile app.py ota.py whitelist.py` 通過
+- 6 個 repro 測試通過（default 載入、從 settings.json 載入、壞欄退回 default、JSON 解析失敗退回 default、get_status、get_defaults）
+- 6 個 E2E 測試通過（合法路徑寫入、具名檔寫入、traversal 攻擊擋下、Windows 磁碟機擋下、副檔名黑名單擋下、白名單前綴外擋下）
+- 部署後 OTA 主機 `/api/admin/status` 回 `allowed_targets_count: 15`（移除 `config/settings.json` 後的新值）
+- 部署後 OTA 主機 `python -c "import whitelist; print(whitelist.get('cors_origins'))"` 回 `['http://localhost:5000', 'http://127.0.0.1:5000', 'http://10.35.31.10:5000']`
+
+**Commit 鏈**：
+
+- `b9c810b` — feat(whitelist): 抽離 5 個白名單到 settings.json，支援 UI 編輯與熱載入（6 files, 422 +/41 -）
