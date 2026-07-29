@@ -1155,6 +1155,67 @@ tasklist | findstr python.exe     ← python 進程在跑
 type logs\watchdog.log            ← watch dog 有紀錄
 ```
 
+### 18.8.1 開機自動啟動（背景啟動的延伸）
+
+工廠機台重啟後希望 GX20 自動起來、不需登入、不需人手動跑 → 用 Windows **工作排程器**呼叫 `start_forever.bat`。
+
+儲存於 repo：`setup_autostart.ps1`（位於 repo 根目錄，3,703 bytes）。
+
+**使用方式**（OTA 主機 PowerShell、需系統管理員權限）：
+
+```powershell
+cd D:\sampo\GX20-PW3335-Data-Collection
+powershell -ExecutionPolicy Bypass -File .\setup_autostart.ps1
+```
+
+**腳本會做的事**：
+1. 檢查 `start_forever.bat` 存在 + 確認管理員權限
+2. 若排程器已存在，問要不要覆蓋
+3. 建立 `GX20-WebMonitor` 工作排程器：
+   - 觸發：開機時（`AtStartup`）
+   - 執行：`D:\sampo\GX20-PW3335-Data-Collection\start_forever.bat`
+   - 使用者：`SYSTEM`（不需登入）
+   - 失敗重試 3 次、間隔 1 分鐘
+4. 印出驗證指令
+
+**完整啟動鏈**：
+
+```
+Windows 開機
+  ↓
+工作排程器觸發 GX20-WebMonitor
+  ↓
+start_forever.bat（PowerShell Start-Process -WindowStyle Hidden）
+  ↓
+ota_watchdog.bat（持續監看 Flask + 自動重啟）
+  ↓
+python app.py（Flask 服務）
+```
+
+**驗證**：
+
+```powershell
+# 看排程器狀態
+Get-ScheduledTask -TaskName "GX20-WebMonitor"
+
+# 立刻觸發（不等開機）
+Start-ScheduledTask -TaskName "GX20-WebMonitor"
+
+# 看 Flask 是否在 5000 port listen
+netstat -ano | findstr :5000
+
+# 看 watchdog log
+type D:\sampo\GX20-PW3335-Data-Collection\logs\watchdog.log
+```
+
+**移除**：
+
+```powershell
+Unregister-ScheduledTask -TaskName "GX20-WebMonitor" -Confirm:$false
+```
+
+**注意**：`setup_autostart.ps1` 不在 OTA 白名單內（`ALLOWED_TARGETS` 不含 `*.ps1`），不能 OTA push；要從 WSL 手動複製或從 GitHub raw URL 拉。
+
 ### 18.9 故障排查對照表
 
 | 現象 | 看哪個 log | 可能原因 |
