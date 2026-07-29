@@ -122,6 +122,9 @@ async function init() {
   renderChGrid();
   syncAllToggleFromGrid();
 
+  // v10.3+：安全白名單區塊渲染（最後一個 card）
+  renderWhitelist();
+
   // 頂部按鈕
   document.getElementById("saveBtn").addEventListener("click", async () => {
     try { await GX20State.save(); alert("已保存"); }
@@ -563,4 +566,109 @@ function bindPwAxisFields() {
     applyPwAxisAutoState(vAutoEl.checked, iAutoEl.checked, w);
     writeBack({ w_auto: w });
   });
+}
+
+// ============================================================
+// v10.3+：安全白名單（whitelist 區塊）
+// 渲染 5 個 list 區塊；使用者按保存時隨 GX20State 一起送出。
+// 變更只在本機有效（POST /api/settings 已鎖本機）。
+// ============================================================
+
+const WHITELIST_KEYS = [
+  { key: "cors_origins",         el: "wlCorsOrigins",    placeholder: "http://host:port" },
+  { key: "ota_admin_ips",        el: "wlOtaAdminIps",    placeholder: "127.0.0.1" },
+  { key: "remote_write_ips",     el: "wlRemoteWriteIps", placeholder: "127.0.0.1" },
+  { key: "ota_allowed_targets",  el: "wlOtaTargets",     placeholder: "static/js/" },
+  { key: "ota_blocked_exts",     el: "wlBlockedExts",    placeholder: ".pyc" },
+];
+
+// 預設值（跟 server whitelist.py DEFAULTS 一致；改任一邊要記得同步另一邊）
+const WHITELIST_DEFAULTS = {
+  cors_origins: [
+    "http://localhost:5000",
+    "http://127.0.0.1:5000",
+    "http://10.35.31.10:5000",
+  ],
+  remote_write_ips: ["127.0.0.1", "::1"],
+  ota_admin_ips: ["127.0.0.1", "::1", "10.35.32.11"],
+  ota_allowed_targets: [
+    "static/js/", "static/css/", "static/vendor/", "templates/",
+    "app.py", "config.py", "storage.py", "gx20_reader.py",
+    "lttb.py", "run.py", "ota.py",
+    "ota_push.py", "ota_watchdog.py", "ota_watchdog.bat",
+    "start_forever.bat",
+  ],
+  ota_blocked_exts: [
+    ".pyc", ".pyo", ".pyd", ".so", ".dll", ".exe",
+    ".bat", ".sh", ".ps1",
+  ],
+};
+
+function _wlReadSettings() {
+  const cur = (GX20State.settings && GX20State.settings.whitelist) || {};
+  const out = {};
+  WHITELIST_KEYS.forEach(({ key }) => {
+    out[key] = Array.isArray(cur[key]) ? cur[key].slice() : WHITELIST_DEFAULTS[key].slice();
+  });
+  return out;
+}
+
+function _wlRenderRow(container, key, value, placeholder, onChange) {
+  const row = document.createElement("div");
+  row.className = "wl-row";
+  const input = document.createElement("input");
+  input.type = "text";
+  input.value = value;
+  input.placeholder = placeholder;
+  input.addEventListener("input", () => onChange());
+  const del = document.createElement("button");
+  del.type = "button";
+  del.className = "btn-del";
+  del.textContent = "刪除";
+  del.addEventListener("click", () => {
+    row.remove();
+    onChange();
+  });
+  row.appendChild(input);
+  row.appendChild(del);
+  container.appendChild(row);
+  return { row, input };
+}
+
+function renderWhitelist() {
+  const data = _wlReadSettings();
+  WHITELIST_KEYS.forEach(({ key, el, placeholder }) => {
+    const container = document.getElementById(el);
+    if (!container) return;
+    container.innerHTML = "";
+
+    const syncToState = () => {
+      const vals = [];
+      container.querySelectorAll(".wl-row input").forEach(inp => {
+        const v = inp.value.trim();
+        if (v) vals.push(v);
+      });
+      const cur = GX20State.settings.whitelist || {};
+      GX20State.update("whitelist", Object.assign({}, cur, { [key]: vals }));
+    };
+
+    (data[key] || []).forEach(v => _wlRenderRow(container, key, v, placeholder, syncToState));
+
+    const btn = document.querySelector(`button[data-wl-key="${key}"]`);
+    if (btn) {
+      btn.onclick = () => {
+        const { input } = _wlRenderRow(container, key, "", placeholder, syncToState);
+        input.focus();
+      };
+    }
+  });
+
+  const resetBtn = document.getElementById("wlResetBtn");
+  if (resetBtn) {
+    resetBtn.onclick = () => {
+      if (!confirm("重置為預設值？目前 5 個白名單都會還原到出廠狀態。")) return;
+      GX20State.update("whitelist", JSON.parse(JSON.stringify(WHITELIST_DEFAULTS)));
+      renderWhitelist();
+    };
+  }
 }

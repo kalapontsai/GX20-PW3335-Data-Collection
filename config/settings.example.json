@@ -39,5 +39,36 @@
     "工位4": { "v": {"min": 0, "max": 230, "auto": false}, "i": {"min": 0, "max": 5, "auto": false}, "w": {"min": 0, "max": 250, "auto": false} },
     "工位5": { "v": {"min": 0, "max": 230, "auto": false}, "i": {"min": 0, "max": 5, "auto": false}, "w": {"min": 0, "max": 250, "auto": false} },
     "工位6": { "v": {"min": 0, "max": 230, "auto": false}, "i": {"min": 0, "max": 5, "auto": false}, "w": {"min": 0, "max": 250, "auto": false} }
+  },
+  "whitelist": {
+    "_comment": "v10.3+：安全白名單（5 個清單）。可在本機 /settings 頁面編輯；改完按保存立即生效（5 秒熱載入）。修改權限自動繼承 /api/settings 的本機鎖。",
+    "cors_origins": [
+      "http://localhost:5000",
+      "http://127.0.0.1:5000",
+      "http://10.35.31.10:5000"
+    ],
+    "remote_write_ips": ["127.0.0.1", "::1"],
+    "ota_admin_ips": ["127.0.0.1", "::1", "10.35.32.11"],
+    "ota_allowed_targets": [
+      "static/js/",
+      "static/css/",
+      "static/vendor/",
+      "templates/",
+      "app.py",
+      "config.py",
+      "storage.py",
+      "gx20_reader.py",
+      "lttb.py",
+      "run.py",
+      "ota.py",
+      "ota_push.py",
+      "ota_watchdog.py",
+      "ota_watchdog.bat",
+      "start_forever.bat"
+    ],
+    "ota_blocked_exts": [
+      ".pyc", ".pyo", ".pyd", ".so", ".dll", ".exe",
+      ".bat", ".sh", ".ps1"
+    ]
   }
 }

@@ -186,10 +186,91 @@
     <div id="chGrid" class="ch-grid"></div>
   </div>
 
+  <!-- ====== 5. 安全白名單（進階，v10.3+） ====== -->
+  <details class="card" id="whitelistSection" style="margin-top: 20px;">
+    <summary style="cursor: pointer; font-weight: bold; padding: 8px 0;">
+      5. 安全白名單（進階）
+    </summary>
+    <p style="color: var(--text-mute); font-size: 12px; margin: 4px 0 12px;">
+      ⚠ 進階設定。改錯可能會把自己鎖在外面。
+      改壞了請手動編輯 <code>config/settings.json</code> 內的 <code>whitelist</code> 區塊。
+    </p>
+
+    <div class="wl-block">
+      <label>允許連線的瀏覽器 Origin（CORS）</label>
+      <div id="wlCorsOrigins" class="wl-list"></div>
+      <button type="button" class="btn btn-add" data-wl-key="cors_origins">+ 新增 origin</button>
+    </div>
+
+    <div class="wl-block">
+      <label>OTA 後台允許的 IP（admin 後台、restart、clear_log）</label>
+      <div id="wlOtaAdminIps" class="wl-list"></div>
+      <button type="button" class="btn btn-add" data-wl-key="ota_admin_ips">+ 新增 IP</button>
+    </div>
+
+    <div class="wl-block">
+      <label>內網寫入 API 允許的 IP（migrate session）</label>
+      <div id="wlRemoteWriteIps" class="wl-list"></div>
+      <button type="button" class="btn btn-add" data-wl-key="remote_write_ips">+ 新增 IP</button>
+    </div>
+
+    <div class="wl-block">
+      <label>
+        OTA 可寫入的路徑前綴
+        <span style="color: var(--text-mute); font-weight: normal;"
+              title="改壞 OTA 推送會失效；這欄是 OTA 寫入路徑的白名單">⚠</span>
+      </label>
+      <div id="wlOtaTargets" class="wl-list"></div>
+      <button type="button" class="btn btn-add" data-wl-key="ota_allowed_targets">+ 新增路徑</button>
+    </div>
+
+    <div class="wl-block">
+      <label>OTA 拒絕的副檔名</label>
+      <div id="wlBlockedExts" class="wl-list"></div>
+      <button type="button" class="btn btn-add" data-wl-key="ota_blocked_exts">+ 新增副檔名</button>
+    </div>
+
+    <div style="margin-top: 16px;">
+      <button type="button" id="wlResetBtn" class="btn btn-secondary">重置為預設值</button>
+    </div>
+  </details>
+
   <p style="color: var(--text-mute); font-size: 12px; margin-top: 20px;">
     ※ 所有變更僅存在本分頁的 session 暫存，按「保存」後才寫入伺服器。
   </p>
 </div>
+
+<style>
+  /* 安全白名單區塊（v10.3+） */
+  .wl-block { margin: 12px 0; }
+  .wl-block > label { display: block; font-weight: bold; margin-bottom: 6px; }
+  .wl-list { margin: 4px 0; }
+  .wl-row {
+    display: flex; gap: 6px; margin-bottom: 4px;
+  }
+  .wl-row input {
+    flex: 1; padding: 6px 8px;
+    border: 1px solid var(--border, #ccc);
+    border-radius: 4px;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 13px;
+  }
+  .wl-row .btn-del {
+    background: #e74c3c; color: #fff; border: none; border-radius: 4px;
+    padding: 4px 10px; cursor: pointer;
+  }
+  .wl-row .btn-del:hover { background: #c0392b; }
+  .btn-add {
+    background: #3498db; color: #fff; border: none; border-radius: 4px;
+    padding: 4px 12px; cursor: pointer; font-size: 13px;
+  }
+  .btn-add:hover { background: #2980b9; }
+  .btn-secondary {
+    background: #95a5a6; color: #fff; border: none; border-radius: 4px;
+    padding: 6px 16px; cursor: pointer;
+  }
+  .btn-secondary:hover { background: #7f8c8d; }
+</style>
 
 <script src="{{ url_for('static', filename='js/storage.js') }}?v=2"></script>
 <script src="{{ url_for('static', filename='js/colorpicker.js') }}?v=2"></script>

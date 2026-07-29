@@ -51,38 +51,20 @@ OTA_BACKUP_DIR = os.path.join(CONFIG_DIR, "ota_backup")
 
 # ---------- 寫入白名單 ----------
 # 相對於 APP_ROOT 的路徑前綴；全部路徑都會被 normalize 後再允許檢查
-ALLOWED_TARGETS = (
-    # 前端
-    "static/js/",
-    "static/css/",
-    "static/vendor/",
-    "templates/",
-    # 後端核心
-    "app.py",
-    "config.py",
-    "storage.py",
-    "gx20_reader.py",
-    "lttb.py",
-    "run.py",
-    # OTA 自己
-    "ota.py",
-    # 工具
-    "ota_push.py",
-    "ota_watchdog.py",
-    "ota_watchdog.bat",
-    "start_forever.bat",
-)
+# v10.3+：從 config/settings.json 的 whitelist 區塊讀取（5 秒熱載入）
+# 預設值見 whitelist.DEFAULTS；首次啟動時 init() 會填入
+from whitelist import get as _wl_get, init as _wl_init  # noqa: E402
+_wl_init()
+ALLOWED_TARGETS = tuple(_wl_get("ota_allowed_targets"))
 
 # 拒絕的副檔名（避免不小心上傳執行檔）
-BLOCKED_EXTS = (".pyc", ".pyo", ".pyd", ".so", ".dll", ".exe", ".bat", ".sh", ".ps1")
+BLOCKED_EXTS = tuple(_wl_get("ota_blocked_exts"))
 
 # ---------- OTA 端點 IP 白名單（v8.4+）----------
 # 只允許特定 IP 呼叫 /api/admin/*。
-# 寫死，不走環境變數：換 IP 一定要改 code + commit，避免默默擴大攻擊面。
-# - 127.0.0.1 / ::1：本機迴路（直接在 GX20 主機上瀏覽器）
-# - 10.35.32.11：WSL 端（管理者從 WSL 推 OTA 的固定 IP）
-# 新增 IP 請走 git commit + code review，不要在這裡加註解規避。
-OTA_ALLOWED_IPS = ("127.0.0.1", "::1", "10.35.32.11")
+# v10.3+：從 config/settings.json 的 whitelist.ota_admin_ips 讀取。
+# 寫死策略已改為「走設定檔」；新增 IP 在本機透過 /settings 頁面修改。
+OTA_ALLOWED_IPS = tuple(_wl_get("ota_admin_ips"))
 
 
 def is_allowed_ip(remote_addr: Optional[str]) -> bool:

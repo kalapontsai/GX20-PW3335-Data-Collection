@@ -160,19 +160,12 @@ log.debug("logger 模組載入完成（尚未決定等級）")
 app = Flask(__name__, static_folder="static", template_folder="templates")
 # SECRET_KEY 從環境變數讀取；本機開發可放在 config/.env 或環境裡
 app.config["SECRET_KEY"] = os.environ.get("FLASK_SECRET_KEY", "gx20-web-monitor-dev-only")
-# CORS 白名單：v8.4+ 收緊到「本機瀏覽器」only
-# 預設只開 localhost / 127.0.0.1（同一台主機上的瀏覽器），不再 "*"
-# 若需要 LAN 跨來源連線（例如 LAN 上的儀表板），用環境變數擴充：
-#   export GX20_ALLOWED_ORIGINS="http://localhost:5000,http://10.35.31.10:5000"
-_ALLOWED_ORIGINS = [
-    o.strip() for o in os.environ.get(
-        "GX20_ALLOWED_ORIGINS",
-        # v8.4.1：加上 OTA 主機 LAN IP（員工手機 / 工廠 LAN 內監看）
-        # 若還需要其他 IP，用 GX20_ALLOWED_ORIGINS 環境變數擴充
-        "http://localhost:5000,http://127.0.0.1:5000,http://10.35.31.10:5000",
-    ).split(",") if o.strip()
-]
-socketio = SocketIO(app, cors_allowed_origins=_ALLOWED_ORIGINS, async_mode="threading")
+# CORS 白名單：v10.3+ 從 config/settings.json 的 whitelist 區塊讀取
+# （沿用 /api/settings 的本機鎖寫入鏈；改檔 5 秒內熱載入）
+# 預設值見 whitelist.py DEFAULTS["cors_origins"]
+import whitelist as _wl
+_wl.init()
+socketio = SocketIO(app, cors_allowed_origins=_wl.get("cors_origins"), async_mode="threading")
 
 
 # ---------- HTTP 請求 log ----------
@@ -846,7 +839,8 @@ def mobile_page():
 #       根治就是讓遠端沒權限改，server 端是 single source of truth。
 # 判定：以 client IP 為準，只接受 127.0.0.1 (IPv4) 跟 ::1 (IPv6)。
 #       不考慮 NAT 封包型像（大大要求簡化）。
-REMOTE_WRITE_ALLOWED_IPS = ("127.0.0.1", "::1")
+# v10.3+：從 config/settings.json 的 whitelist.remote_write_ips 讀取
+REMOTE_WRITE_ALLOWED_IPS = tuple(_wl.get("remote_write_ips"))
 
 
 def _is_local_request() -> bool:
