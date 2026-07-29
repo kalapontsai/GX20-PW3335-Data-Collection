@@ -76,6 +76,21 @@ ALLOWED_TARGETS = (
 # 拒絕的副檔名（避免不小心上傳執行檔）
 BLOCKED_EXTS = (".pyc", ".pyo", ".pyd", ".so", ".dll", ".exe", ".bat", ".sh", ".ps1")
 
+# ---------- OTA 端點 IP 白名單（v8.4+）----------
+# 只允許特定 IP 呼叫 /api/admin/*。
+# 寫死，不走環境變數：換 IP 一定要改 code + commit，避免默默擴大攻擊面。
+# - 127.0.0.1 / ::1：本機迴路（直接在 GX20 主機上瀏覽器）
+# - 10.35.32.11：WSL 端（管理者從 WSL 推 OTA 的固定 IP）
+# 新增 IP 請走 git commit + code review，不要在這裡加註解規避。
+OTA_ALLOWED_IPS = ("127.0.0.1", "::1", "10.35.32.11")
+
+
+def is_allowed_ip(remote_addr: Optional[str]) -> bool:
+    """檢查 remote_addr 是否在 OTA 白名單。"""
+    if not remote_addr:
+        return False
+    return remote_addr in OTA_ALLOWED_IPS
+
 
 # ============================================================
 # Token 管理

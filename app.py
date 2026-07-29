@@ -160,7 +160,17 @@ log.debug("logger 模組載入完成（尚未決定等級）")
 app = Flask(__name__, static_folder="static", template_folder="templates")
 # SECRET_KEY 從環境變數讀取；本機開發可放在 config/.env 或環境裡
 app.config["SECRET_KEY"] = os.environ.get("FLASK_SECRET_KEY", "gx20-web-monitor-dev-only")
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
+# CORS 白名單：v8.4+ 收緊到「本機瀏覽器」only
+# 預設只開 localhost / 127.0.0.1（同一台主機上的瀏覽器），不再 "*"
+# 若需要 LAN 跨來源連線（例如 LAN 上的儀表板），用環境變數擴充：
+#   export GX20_ALLOWED_ORIGINS="http://localhost:5000,http://10.35.31.10:5000"
+_ALLOWED_ORIGINS = [
+    o.strip() for o in os.environ.get(
+        "GX20_ALLOWED_ORIGINS",
+        "http://localhost:5000,http://127.0.0.1:5000",
+    ).split(",") if o.strip()
+]
+socketio = SocketIO(app, cors_allowed_origins=_ALLOWED_ORIGINS, async_mode="threading")
 
 
 # ---------- HTTP 請求 log ----------
@@ -1258,7 +1268,11 @@ def api_debug():
         body: {"enabled": true/false}
         也可省略 body（toggle）
     變更會即時生效，並寫入 settings 表。
+    v8.4+：嚴格鎖本機（127.0.0.1 / ::1），遠端不可讀 log 路徑、開關。
     """
+    if not _is_local_request():
+        log.warning("api_debug 被擋（非本機 IP=%s）", request.remote_addr)
+        return jsonify({"ok": False, "error": "readonly"}), 403
     cur = _is_debug_enabled()
     if request.method == "GET":
         return jsonify({
@@ -1288,7 +1302,11 @@ def api_debug_log_tail():
     查詢 app.log 末段（debug 模式診斷用）。
     Query:
       ?lines=N  預設 100
+    v8.4+：嚴格鎖本機（127.0.0.1 / ::1），遠端不可讀 log。
     """
+    if not _is_local_request():
+        log.warning("api_debug/log_tail 被擋（非本機 IP=%s）", request.remote_addr)
+        return jsonify({"ok": False, "error": "readonly"}), 403
     try:
         n = max(1, min(2000, int(request.args.get("lines", "100"))))
     except (TypeError, ValueError):
@@ -1319,7 +1337,11 @@ def api_admin_status():
     """
     檢查 OTA 狀態。
     公開可讀（不洩漏 token），只回 fingerprint 供使用者確認 token 已設定。
+    v8.4+：IP 白名單限制，只有 OTA 白名單 IP 可呼叫。
     """
+    if not _ota.is_allowed_ip(request.remote_addr):
+        log.warning("api_admin/status 被擋（非白名單 IP=%s）", request.remote_addr)
+        return jsonify({"ok": False, "error": "forbidden"}), 403
     s = _ota.status()
     return jsonify(s)
 
@@ -1332,7 +1354,11 @@ def api_admin_ota():
     Form:
       - file:  檔案
       - target: 相對於 APP_ROOT 的路徑（例: static/js/main.js）
+    v8.4+：IP 白名單限制。
     """
+    if not _ota.is_allowed_ip(request.remote_addr):
+        log.warning("api_admin/ota 被擋（非白名單 IP=%s）", request.remote_addr)
+        return jsonify({"ok": False, "error": "forbidden"}), 403
     if not _ota.check_token(request.headers.get("X-OTA-Token")):
         return jsonify({"ok": False, "error": "invalid or missing token"}), 401
     target = (request.form.get("target") or "").strip()
@@ -1362,6 +1388,9 @@ def api_admin_ota_bundle():
         "restart": true   // 可選，呼叫後觸發自我重啟
       }
     """
+    if not _ota.is_allowed_ip(request.remote_addr):
+        log.warning("api_admin/ota_bundle 被擋（非白名單 IP=%s）", request.remote_addr)
+        return jsonify({"ok": False, "error": "forbidden"}), 403
     if not _ota.check_token(request.headers.get("X-OTA-Token")):
         return jsonify({"ok": False, "error": "invalid or missing token"}), 401
     body = request.get_json(silent=True) or {}
@@ -1398,7 +1427,11 @@ def api_admin_restart():
     觸發自我重啟。
     Header: X-OTA-Token: <token>
     Body: {"delay": 2}  // 可選，預設 2 秒
+    v8.4+：IP 白名單限制。
     """
+    if not _ota.is_allowed_ip(request.remote_addr):
+        log.warning("api_admin/restart 被擋（非白名單 IP=%s）", request.remote_addr)
+        return jsonify({"ok": False, "error": "forbidden"}), 403
     if not _ota.check_token(request.headers.get("X-OTA-Token")):
         return jsonify({"ok": False, "error": "invalid or missing token"}), 401
     body = request.get_json(silent=True) or {}
@@ -1415,7 +1448,11 @@ def api_admin_clear_log():
     Header: X-OTA-Token: <token>
     Body 可省略；保留期實作為「全清」。
     用途：debug log 開啟前先清，避免前一波資料虛胖。
+    v8.4+：IP 白名單限制。
     """
+    if not _ota.is_allowed_ip(request.remote_addr):
+        log.warning("api_admin/clear_log 被擋（非白名單 IP=%s）", request.remote_addr)
+        return jsonify({"ok": False, "error": "forbidden"}), 403
     if not _ota.check_token(request.headers.get("X-OTA-Token")):
         return jsonify({"ok": False, "error": "invalid or missing token"}), 401
     return jsonify(_ota.clear_log_file())
