@@ -167,7 +167,9 @@ app.config["SECRET_KEY"] = os.environ.get("FLASK_SECRET_KEY", "gx20-web-monitor-
 _ALLOWED_ORIGINS = [
     o.strip() for o in os.environ.get(
         "GX20_ALLOWED_ORIGINS",
-        "http://localhost:5000,http://127.0.0.1:5000",
+        # v8.4.1：加上 OTA 主機 LAN IP（員工手機 / 工廠 LAN 內監看）
+        # 若還需要其他 IP，用 GX20_ALLOWED_ORIGINS 環境變數擴充
+        "http://localhost:5000,http://127.0.0.1:5000,http://10.35.31.10:5000",
     ).split(",") if o.strip()
 ]
 socketio = SocketIO(app, cors_allowed_origins=_ALLOWED_ORIGINS, async_mode="threading")
