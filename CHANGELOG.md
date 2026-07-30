@@ -23,6 +23,7 @@
 13. [現況進度（2026-07-24 snapshot 統計時區 bug v10.1.1）](#13-現況進度2026-07-24-snapshot-統計時區-bug-v1011)
 14. [現況進度（2026-07-24 取消 PW3335 『啟用』開關 v10.2）](#14-現況進度2026-07-24-取消-pw3335-啟用-開關-v102)
 15. [現況進度（2026-07-27 行動簡式頁面 /mobile v10.3）](#15-現況進度2026-07-27-行動簡式頁面-mobile-v103)
+16. [現況進度（2026-07-30 whitelist save/load 鏈修補 v10.3.2）](#16-現況進度2026-07-30-whitelist-saveload-鏈修補-v1032)
 
 ---
 
@@ -1220,3 +1221,60 @@ alias 全等於 `default_alias()` 時就**不寫實際值**，只標記 `null`�
 **Commit 鏈**：
 
 - `b9c810b` — feat(whitelist): 抽離 5 個白名單到 settings.json，支援 UI 編輯與熱載入（6 files, 422 +/41 -）
+
+---
+
+## 16. 現況進度（2026-07-30 whitelist save/load 鏈修補 v10.3.2）
+
+**背景**：
+
+v10.3.1（commit `b9c810b`）把 5 個白名單從 hardcode 抽離到 `config/settings.json`，並提供 UI 編輯介面。但**寫入鏈沒對齊**：
+
+- 前端 `settings.js` 在保存時會用 `GX20State.update("whitelist", ...)` 把整包 whitelist 物件送進 `POST /api/settings`
+- `app.py:save_settings()` 的 `for k, v in patch.items()` 沒對 `whitelist` 做特別處理 → 走 `else: storage.set_setting(k, str(v))`
+- 結果：SQLite 內 `whitelist` 變成 `"{'cors_origins': ...}"`（Python `str(dict)` 不是合法 JSON）
+- `load_settings()` 也沒讀 `whitelist` → 回傳的 dict 內沒有 `whitelist` key
+- `dump settings.json` 段（save_settings 結尾）也不會包含 `whitelist` 區塊
+- 症狀：在 OTA 本機瀏覽器 (`127.0.0.1/settings`) 修改白名單按保存後，`config/settings.json` 內沒有 whitelist 區塊 → 下次重啟 Flask 時 `whitelist.py` 退回 DEFAULTS，UI 編輯全部丟失
+
+**根因**（v10.3.1 漏接的部分）：
+
+1. `save_settings` 的 dispatch 漏了 `whitelist` 這個 key（其他 per-station / per-axis 結構 key 都有專屬處理）
+2. `load_settings` 沒從 SQLite 讀回 `whitelist`，也沒 merge DEFAULTS 兜底
+3. `dump settings.json` 那段用 `load_settings()` 結果寫檔，所以 #2 沒補 #1 也白搭
+
+**修法**（v10.3.2 變更）：
+
+| 檔 | 變更 |
+|---|---|
+| `app.py:save_settings` | 新增 `elif k == "whitelist":` 分支，**條件只檢查 key**（不檢查 `isinstance(v, dict)`）；進入後若 `v` 不是 dict → log warning + `continue`（不寫、不覆蓋 SQLite 內原值）。其餘走 per-key merge：5 個子 key 逐個 merge，patch 只送 `cors_origins` 時其他 4 個保留 |
+| `app.py:load_settings` | 結尾 `return out` 前加讀 `whitelist`：SQLite → JSON 解碼 → 缺漏子 key 用 `_wl.DEFAULTS` 補；型別錯的子 key 也保留 default（不讓單一欄位壞整份） |
+| `whitelist.py` | **不動**（你 14:29 附加條件「執行時檢查 settings.json 是否有值」已是現有設計：`_load_from_disk` + `_reload_if_changed` mtime 熱載入） |
+| `config.default_settings` | **不加** `whitelist` key（避免兩邊 default 漂移） |
+
+**B 方案的設計理由**（為什麼非 dict 直接忽略）：
+
+`whitelist` 是關鍵安全設定（CORS / IP 鎖 / OTA 寫入路徑），不能用一般 key 的 `else: str(v)` 容錯哲學。若前端 bug 或惡意 payload 送 `whitelist = "xxx"`（非 dict），**絕對不能**讓它把 SQLite 內原本的 JSON 蓋成 str，然後下次 load 觸發 JSON parse 失敗 fallback 到 DEFAULTS。
+
+正確做法：非 dict 寫入**直接忽略 + log warning**，保留 SQLite 內原值，下一次正確 patch 進來還能 merge 回來。
+
+**單一真相來源**：`whitelist.py:DEFAULTS`（不放在 `config.default_settings()`，避免兩邊 default 漂移）。
+
+**新增測試**：
+
+- `tests/test_whitelist_save_repro.py` — 5 個 shape（basic save+load、per-key merge、非 dict 容錯保留原值、SQLite 已有 whitelist load 時 DEFAULTS 兜底、dump settings.json 含完整結構）全部通過
+
+**驗證 SOP**：
+
+- `py_compile app.py` 通過
+- `python tests/test_whitelist_save_repro.py` → 29 pass / 0 fail
+- OTA 推送前再跑一次 repro（避免推送後 OTA 端 Flask 重啟鏈中斷時 silent failure）
+- 推送後 OTA 端流程：
+  - 本機瀏覽器 `127.0.0.1/settings` → 安全白名單區塊 → 改 `cors_origins` 加一筆 → 按保存
+  - `curl -s http://127.0.0.1:5000/api/settings | python -m json.tool | grep cors_origins` 確認新值在記憶體
+  - OTA 主機開檔 `config/settings.json` 確認 `whitelist` 區塊有寫進去
+  - 5 秒內（whitelist.py mtime 熱載入機制）`python -c "import whitelist; whitelist._reload_if_changed(); print(whitelist.get('cors_origins'))"` 確認拿到新值
+
+**Commit 鏈**：
+
+- `<待 commit>` — fix(whitelist): save/load 鏈補上 whitelist patch 處理（save_settings 分支 + load_settings merge + B 方案非 dict 容錯）

@@ -49,3 +49,6 @@ screenshots/
 test-results/
 playwright-report/
 .trash_archive_*
+
+# 軟刪除歸檔目錄（AGENTS.md 政策：禁止 rm -rf，用 mv 進 .trash/）
+.trash/

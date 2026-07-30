@@ -354,6 +354,23 @@ def load_settings() -> dict:
             merged_pw_axis[st] = cur
         out["pw_axis"] = merged_pw_axis
 
+    # v10.3.x：whitelist = {cors_origins, ota_admin_ips, remote_write_ips,
+    #                       ota_allowed_targets, ota_blocked_exts}
+    # 單一真相來源：whitelist.py:DEFAULTS（不再放 config.default_settings()，
+    # 避免兩邊 default 漂移）。
+    # SQLite 內存的是整包 JSON；缺漏子 key 用 _wl.DEFAULTS 補，
+    # 型別錯的子 key 也保留 default（不讓單一欄位壞整份）。
+    wl_raw = config.from_json(raw.get("whitelist"), default=_wl.get_defaults())
+    if not isinstance(wl_raw, dict):
+        wl_raw = _wl.get_defaults()
+    wl_merged = dict(_wl.get_defaults())
+    for sub_key, sub_default in _wl.DEFAULTS.items():
+        v = wl_raw.get(sub_key)
+        if isinstance(v, list) and all(isinstance(x, str) for x in v):
+            wl_merged[sub_key] = list(v)
+        # else: 保留 default（容錯不洗掉）
+    out["whitelist"] = wl_merged
+
     return out
 
 
@@ -446,6 +463,33 @@ def save_settings(patch: dict) -> None:
                 if st in STATIONS and isinstance(val, str):
                     existing[st] = val[:20]  # 與 load_settings 一致的截斷
             storage.set_setting("notes", config.to_json(existing))
+        elif k == "whitelist":
+            # v10.3.x：whitelist = {cors_origins, ota_admin_ips, remote_write_ips,
+            #                       ota_allowed_targets, ota_blocked_exts}
+            # 整包存成一個 SQLite row（key="whitelist"，value=JSON），
+            # 但 5 個子 key 採 per-key merge：patch 只送 cors_origins 時，
+            # 其他 4 個保留（不被洗掉）。
+            # 單一真相來源仍是 whitelist.py:DEFAULTS；load_settings 那邊會再 merge。
+            #
+            # v10.3.x+ B 方案：非 dict 寫入直接忽略（不寫、不覆蓋 SQLite 內原值）。
+            # 理由：whitelist 是關鍵安全設定，不能讓前端 bug 或惡意 payload
+            # 把整個 whitelist 蓋成 str 後下次 load fallback 到 DEFAULTS。
+            if not isinstance(v, dict):
+                log.warning("save_settings: whitelist 型別錯誤（%s），忽略 patch（保留現有值）",
+                            type(v).__name__)
+                continue
+            existing_raw = storage.get_setting("whitelist")
+            existing = config.from_json(existing_raw, default=_wl.get_defaults())
+            if not isinstance(existing, dict):
+                existing = _wl.get_defaults()
+            for sub_key, sub_val in v.items():
+                # 只接受 whitelist.py:DEFAULTS 有的子 key，避免前端塞垃圾欄位
+                # 型別檢查：必須是 list[str]，否則保留舊值（容錯不洗掉）
+                if sub_key in _wl.DEFAULTS \
+                        and isinstance(sub_val, list) \
+                        and all(isinstance(x, str) for x in sub_val):
+                    existing[sub_key] = list(sub_val)
+            storage.set_setting("whitelist", config.to_json(existing))
         else:
             storage.set_setting(k, str(v))
 
