@@ -738,3 +738,139 @@ body.cursor-mode .chart-temp { flex: 1 1 0; }
 /* .snapshot-stack 內的 .chart-temp 強制 7:3 切分（蓋掉 .snapshot-chart 的 flex:1） */
 .snapshot-stack > .chart-temp { flex: 7 1 0; min-height: 240px; }
 .snapshot-stack > .chart-pw   { flex: 3 1 0; border-top: 1px solid var(--border); min-height: 120px; }
+
+/* ====================================================================== */
+/* v11.x：/calculator 計算頁                                            */
+/* ====================================================================== */
+
+/* 計算頁主畫面（左圖右參數 / 下方結果框） */
+.calc-main {
+  display: grid;
+  grid-template-columns: 1fr 360px;
+  grid-template-rows: 1fr auto;
+  grid-template-areas:
+    "chart    params"
+    "result   params";
+  gap: 12px;
+  padding: 12px;
+  height: calc(100vh - 50px);
+}
+
+/* 圖表區域（單 chart，不分溫度 / 電力） */
+.calc-chart-area {
+  grid-area: chart;
+  position: relative;
+  background: var(--surface);
+  border-radius: 6px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+  min-height: 320px;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 計算頁 chart 不用 .chart-pw 上下的 7:3，給 chart 100% 高 */
+.calc-chart-area .chart-pane { flex: 1 1 0; min-height: 0; }
+.calc-chart-area canvas { width: 100% !important; height: 100% !important; display: block; }
+
+/* CSV 上傳區塊（圖表上方一行） */
+.calc-upload-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  color: var(--text-dim);
+}
+.calc-upload-bar input[type="file"] { flex: 1; min-width: 0; font: inherit; }
+.calc-upload-bar .file-info { color: var(--text); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+
+/* 結果文字框（計算頁下方） */
+.calc-result-area {
+  grid-area: result;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: var(--shadow);
+  padding: 8px 12px;
+  max-height: 38vh;
+  overflow: auto;
+}
+.calc-result-area pre {
+  margin: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* 參數面板（計算頁右側） */
+.calc-params {
+  grid-area: params;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: var(--shadow);
+  padding: 12px;
+  overflow-y: auto;
+}
+.calc-params h3 {
+  margin: 0 0 8px 0;
+  font-size: 14px;
+  color: var(--primary-h);
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 4px;
+}
+.calc-params .param-card {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+}
+.calc-params .param-card .row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 0;
+}
+.calc-params .param-card label {
+  min-width: 70px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.calc-params .param-card input[type="number"],
+.calc-params .param-card input[type="text"] {
+  flex: 1;
+  min-width: 0;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 3px 6px;
+  font: inherit;
+  font-size: 13px;
+}
+.calc-params .param-card .checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text);
+  margin-top: 4px;
+}
+.calc-params .param-card .checkbox-row input[type="checkbox"] { width: 14px; height: 14px; cursor: pointer; }
+.calc-params .save-bar {
+  position: sticky;
+  bottom: 0;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  padding: 8px 0 0 0;
+  margin-top: 8px;
+  text-align: right;
+}

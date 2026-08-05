@@ -507,14 +507,9 @@ function applyYAxisToChart() {
 }
 
 // 圖表軸 / 格線 / 文字色，根據當前主題切換
+// v1：共用 chart-utils.js 的 chartColors()，確保 index.html 跟 /calculator 同主題
 function chartColors() {
-  const cs = getComputedStyle(document.body);
-  return {
-    text:    cs.getPropertyValue("--text-dim").trim() || "#888",
-    textStrong: cs.getPropertyValue("--text").trim() || "#fff",
-    grid:    cs.getPropertyValue("--grid").trim() || "rgba(0,0,0,0.1)",
-    bg:      cs.getPropertyValue("--surface").trim() || "#fff",
-  };
+  return ChartUtils.chartColors();
 }
 
 function buildChart() {
@@ -1471,9 +1466,8 @@ function layoutCursorBars() {
 }
 
 function _fmtTs(d) {
-  if (!d) return "—";
-  const p = n => String(n).padStart(2, "0");
-  return `${p(d.getMonth()+1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+  // v1：共用 chart-utils.js 的 formatTs()
+  return ChartUtils.formatTs(d);
 }
 
 /**

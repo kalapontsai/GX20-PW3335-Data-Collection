@@ -877,6 +877,25 @@ def mobile_page():
     )
 
 
+# v11.x：/calculator 計算頁
+#
+# 流程：使用者在 index.html 按「儲存 CSV」 → 編輯（去空白 / 刪時段）
+#       → 重新上傳到 /calculator。
+# /calculator 純前端解析 CSV（無上傳到 server），EF / 統計 / 週期
+# 計算全在瀏覽器執行（從 chart-utils.js 抽共用函式）。
+# 結果對齊 Python 原版 plot_gui_雙信.py（EnergyCalculator rev.0.5）。
+#
+# 對齊頁面：見 templates/calculator.html + static/js/calculator.js
+# 不需要 IP 白名單（純前端）、不需要 OTA token。
+@app.route("/calculator")
+def calculator_page():
+    return render_template(
+        "calculator.html",
+        stations=STATIONS,
+        points_per_station=POINTS_PER_STATION,
+    )
+
+
 # v8.1.2：設定變更權限鎖本機
 # 決策：只有 OTA 本機 (127.0.0.1) 可變更設定，遠端瀏覽器只能讀。
 # 原因：v8.1.1 migrate legacy session 會「意外覆寫 server 設定」（跨工位污染），
