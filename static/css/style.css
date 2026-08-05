@@ -875,10 +875,13 @@ body.cursor-mode .chart-temp { flex: 1 1 0; }
   text-align: right;
 }
 
-/* v11.x：最佳區段 highlight（cursor overlay 套 .best 時變綠） */
-.cursor-overlay.best .cursor-bar.cursor-left  { background: #28a745; box-shadow: 0 0 0 1px rgba(255,255,255,0.6); }
-.cursor-overlay.best .cursor-bar.cursor-right { background: #28a745; box-shadow: 0 0 0 1px rgba(255,255,255,0.6); }
-.cursor-overlay.best .cursor-range { background: rgba(40, 167, 69, 0.18); }
+/* v11.x：最佳區段 highlight（cursor overlay 套 .best 時變綠）
+   註：/calculator 兩條 X-line 都是「區段邊界」，不需區分方向，
+   所以預設就都是綠色。以下規則用 .calc-chart-area 提高 specificity
+   覆蓋 index.html 預設的 left綠/right紅。 */
+.calc-chart-area .cursor-overlay .cursor-bar.cursor-left  { background: #28a745; box-shadow: 0 0 0 1px rgba(255,255,255,0.6); }
+.calc-chart-area .cursor-overlay .cursor-bar.cursor-right { background: #28a745; box-shadow: 0 0 0 1px rgba(255,255,255,0.6); }
+.calc-chart-area .cursor-overlay .cursor-range { background: rgba(40, 167, 69, 0.18); }
 
 /* v11.x：進度遮罩（計算頁掃描時） */
 .calc-progress-overlay {

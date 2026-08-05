@@ -867,14 +867,10 @@
     lastResult = banner;
     document.getElementById('resultText').textContent = lastResult;
 
-    // 2. X-line 移到邊界
+    // 2. X-line 移到邊界（兩條 X-line 預設就是綠色，見 CSS .calc-chart-area 區塊）
     cursor.setPositions(start, end);
 
-    // 3. cursor overlay 加 .best class（變綠色 highlight）
-    const overlay = document.getElementById('calcCursorOverlay');
-    if (overlay) overlay.classList.add('best');
-
-    // 4. status
+    // 3. status
     const elapsedSec = ((performance.now() - scanState.startTs) / 1000).toFixed(2);
     setStatus(`最佳 EF=${ef}（24H ${watt}W，掃 ${totalSteps} 步 / ${elapsedSec}s）`, 'ok');
   }
