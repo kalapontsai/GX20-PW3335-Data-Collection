@@ -874,3 +874,61 @@ body.cursor-mode .chart-temp { flex: 1 1 0; }
   margin-top: 8px;
   text-align: right;
 }
+
+/* v11.x：最佳區段 highlight（cursor overlay 套 .best 時變綠） */
+.cursor-overlay.best .cursor-bar.cursor-left  { background: #28a745; box-shadow: 0 0 0 1px rgba(255,255,255,0.6); }
+.cursor-overlay.best .cursor-bar.cursor-right { background: #28a745; box-shadow: 0 0 0 1px rgba(255,255,255,0.6); }
+.cursor-overlay.best .cursor-range { background: rgba(40, 167, 69, 0.18); }
+
+/* v11.x：進度遮罩（計算頁掃描時） */
+.calc-progress-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  flex-direction: column;
+  gap: 12px;
+}
+.calc-progress-overlay.active { display: flex; }
+.calc-progress-overlay .progress-box {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 16px 24px;
+  min-width: 280px;
+  box-shadow: var(--shadow);
+  text-align: center;
+}
+.calc-progress-overlay .progress-title { font-size: 15px; color: var(--text); margin-bottom: 8px; }
+.calc-progress-overlay .progress-bar {
+  height: 8px;
+  background: var(--surface-2);
+  border-radius: 4px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+.calc-progress-overlay .progress-fill {
+  height: 100%;
+  background: var(--primary);
+  width: 0%;
+  transition: width 0.1s linear;
+}
+.calc-progress-overlay .progress-percent {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-top: 6px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.calc-progress-overlay .spinner {
+  width: 36px;
+  height: 36px;
+  border: 3px solid var(--border);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: calc-spin 0.9s linear infinite;
+  margin: 0 auto 4px auto;
+}
+@keyframes calc-spin { to { transform: rotate(360deg); } }

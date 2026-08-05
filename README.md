@@ -519,10 +519,10 @@ EF 演算法完全照 `kalapontsai/Data-plot-and-EEF-calculate` 的 `plot_gui_�
 
 | 檔案 | 用途 |
 |---|---|
-| `templates/calculator.html` | 計算頁主畫面（圖表 + 參數面板 + 結果文字框） |
-| `static/js/calculator.js` | CSV parser / statistics / EF（純前端） |
+| `templates/calculator.html` | 計算頁主畫面（圖表 + 參數面板 + 結果文字框 + 尋找最佳數據按鈕） |
+| `static/js/calculator.js` | CSV parser / statistics / EF / 滑動視窗掃描（純前端） |
 | `static/js/chart-utils.js` | 共用 chart API |
-| `tools/verify_calculator.py` | Python 原版 + JS 版 diff 驗證工具 |
+| `tools/verify_calculator.py` | Python 原版 + JS 版 diff 驗證工具（含 scanBestWindow 掃描驗證） |
 
 #### 路由
 
@@ -532,6 +532,29 @@ EF 演算法完全照 `kalapontsai/Data-plot-and-EEF-calculate` 的 `plot_gui_�
 def calculator_page():
     return render_template("calculator.html", stations=STATIONS, points_per_station=POINTS_PER_STATION)
 ```
+
+#### 「尋找最佳數據」滑動視窗掃描（v11.1）
+
+計算頁 topbar 的「尋找最佳數據」按鈕會以 **1440 分鐘（24H）窗口滑動掃描**整個資料段，找出 **EF 最高的 24H 區段**。
+
+- 窗口大小：1440 分鐘（24H，1 分鐘粒度 = 1440 筆）
+- 步進：10 分鐘（10 筆）
+- 總步數：`(資料長度 − 1440) / 10 + 1`，例如 1442 筆 = **397 步**
+- 評分指標：**EF 最高**（同時記錄 watt 供參考）
+- 效能：3 個 H61DV CSV 跑完 < 1 秒，預估 < 3 秒不顯示進度遮罩
+- 長資料（如 1 週）會觸發進度遮罩 + spinner + 進度條（>3 秒門檻才顯示）
+- 找到最佳後：把現有兩條 X-line 移到邊界 + cursor overlay 變綠色 highlight
+  + 結果文字框加「【最佳 24H 區段】時間 / EF / 24H 耗電 / 掃描步數」摘要
+
+**驗證**（3 個 H61DV CSV）：
+
+| 工位 | bestEF | bestWatt | bestStart |
+|---|---|---|---|
+| NEW1200 | 30.8 | 815 W | 2026-08-01T06:46:00 |
+| OLD1200 | 29.6 | 843 W | 2026-08-01T05:45:00 |
+| VIP800  | 29.6 | 843 W | 2026-08-01T05:45:00 |
+
+Py vs JS 掃描結果 **3/3 完全一致**。
 
 #### 驗證
 

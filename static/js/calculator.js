@@ -555,6 +555,10 @@
     document.getElementById('csvFileInput').addEventListener('change', onFileSelected);
     document.getElementById('loadSampleBtn').addEventListener('click', loadSample);
     document.getElementById('saveResultBtn').addEventListener('click', saveResult);
+    document.getElementById('findBestBtn').addEventListener('click', onFindBestClicked);
+
+    // 動態注入進度遮罩（只在掃描時顯示，預設 0.1 秒前都不出現）
+    injectProgressOverlay();
 
     // 參數變更時即時重算
     ['paramVf', 'paramVr', 'paramFreezerTemp', 'paramFridgeTemp', 'paramFanType', 'paramOnOffTh'].forEach((id) => {
@@ -680,6 +684,199 @@
     const r = calculateStatistics(parsed, cursor.tsLeft, cursor.tsRight, params);
     lastResult = formatResult(r);
     document.getElementById('resultText').textContent = lastResult;
+  }
+
+  // ===========================================================
+  // 「尋找最佳數據」：以 1440 分鐘（24H）窗口滑動掃描找最高 EF
+  // ===========================================================
+
+  // 預估單步計算成本（每次掃描前先跑 1 步量時間，用線性預估）
+  const SCAN_SAMPLE_MS = 50;          // 預估取樣步數
+  const SCAN_THRESHOLD_MS = 3000;     // 預估超過 3 秒才顯示動畫
+
+  // 掃描狀態（單一執行緒）
+  const scanState = {
+    running: false,
+    cancel: false,
+    startTs: 0,
+  };
+
+  function onFindBestClicked() {
+    if (scanState.running) {
+      // 第二次按 = 取消
+      scanState.cancel = true;
+      setStatus('掃描取消中…', 'warn');
+      return;
+    }
+    if (!parsed || !parsed.datetime || parsed.datetime.length === 0) {
+      alert('請先載入 CSV');
+      return;
+    }
+    const params = getParams();
+    if (!(params.vf > 0) || !(params.vr > 0)) {
+      alert('請設定 VF / VR（必須 > 0）');
+      return;
+    }
+    runBestWindowScan(parsed, params);
+  }
+
+  function injectProgressOverlay() {
+    if (document.getElementById('calcProgressOverlay')) return;
+    const div = document.createElement('div');
+    div.className = 'calc-progress-overlay';
+    div.id = 'calcProgressOverlay';
+    div.innerHTML = `
+      <div class="progress-box">
+        <div class="spinner"></div>
+        <div class="progress-title">操作中 — 掃描中</div>
+        <div class="progress-bar"><div class="progress-fill" id="calcProgressFill"></div></div>
+        <div class="progress-percent" id="calcProgressPercent">0%</div>
+      </div>`;
+    document.body.appendChild(div);
+  }
+
+  function showProgress(percent, title) {
+    const overlay = document.getElementById('calcProgressOverlay');
+    if (!overlay) return;
+    overlay.classList.add('active');
+    const fill = document.getElementById('calcProgressFill');
+    const pct = document.getElementById('calcProgressPercent');
+    const tt = overlay.querySelector('.progress-title');
+    if (fill) fill.style.width = Math.min(100, Math.max(0, percent)).toFixed(1) + '%';
+    if (pct)  pct.textContent = Math.round(percent) + '%';
+    if (tt && title) tt.textContent = title;
+  }
+  function hideProgress() {
+    const overlay = document.getElementById('calcProgressOverlay');
+    if (overlay) overlay.classList.remove('active');
+  }
+
+  /**
+   * 1440 分鐘（24H）窗口滑動掃描找最高 EF。
+   * 步進 = 10 分鐘（= 10 筆/分鐘粒度）。
+   *
+   * 先以 sample 預估總時間；若 > 3 秒才顯示進度遮罩 + setTimeout 分批執行。
+   * 每批 200 步後讓出 UI thread，避免卡住畫面。
+   */
+  function runBestWindowScan(parsedLocal, params) {
+    scanState.running = true;
+    scanState.cancel = false;
+    scanState.startTs = performance.now();
+    setStatus('掃描中…', 'warn');
+
+    const STEP = 10;                          // 步進 = 10 分鐘（10 筆/1 分鐘粒度）
+    const WIN  = 1440;                        // 窗口 = 24H = 1440 分鐘
+    const N = parsedLocal.datetime.length;
+    if (N < WIN) {
+      alert(`資料長度 ${N} 筆不足 24H（1440 分鐘），無法掃描 24H 窗口`);
+      scanState.running = false;
+      setStatus('掃描中止：資料不足 24H', 'err');
+      return;
+    }
+    const totalSteps = Math.floor((N - WIN) / STEP) + 1;
+
+    // ---- 預估時間（跑前 SCAN_SAMPLE_MS 步量時間，線性外推） ----
+    const sampleN = Math.min(SCAN_SAMPLE_MS, totalSteps);
+    const sampleT0 = performance.now();
+    for (let i = 0; i < sampleN; i++) {
+      const idxStart = i * STEP;
+      const idxEnd = idxStart + WIN - 1;
+      const start = parsedLocal.datetime[idxStart];
+      const end = parsedLocal.datetime[idxEnd];
+      const r = calculateStatistics(parsedLocal, start, end, params);
+      // r 一定 ok（範圍內一定有資料）
+      if (!r.ef || !r.ef.results) continue;  // 不強取，給 compiler hint
+    }
+    const sampleT1 = performance.now();
+    const sampleElapsed = (sampleT1 - sampleT0) / 1000;
+    const samplePerStep = sampleElapsed / Math.max(1, sampleN);
+    const estTotalSec = samplePerStep * totalSteps;
+
+    // 預估 < 3 秒 → 不顯示動畫（背景照跑）
+    // 預估 >= 3 秒 → 顯示動畫、setTimeout 分批
+    const showAnim = estTotalSec * 1000 >= SCAN_THRESHOLD_MS;
+    if (showAnim) {
+      showProgress(0, '操作中 — 掃描中');
+    }
+
+    // ---- 跑完整掃描 ----
+    let bestEf = -Infinity;
+    let bestWatt = Infinity;
+    let bestStart = null;
+    let bestEnd = null;
+    let stepsDone = 0;
+    const BATCH_SIZE = 200;
+
+    function runBatch() {
+      if (scanState.cancel) {
+        scanState.running = false;
+        scanState.cancel = false;
+        hideProgress();
+        setStatus('已取消掃描', 'warn');
+        return;
+      }
+      const batchEnd = Math.min(stepsDone + BATCH_SIZE, totalSteps);
+      for (let i = stepsDone; i < batchEnd; i++) {
+        const idxStart = i * STEP;
+        const idxEnd = idxStart + WIN - 1;
+        const start = parsedLocal.datetime[idxStart];
+        const end = parsedLocal.datetime[idxEnd];
+        const r = calculateStatistics(parsedLocal, start, end, params);
+        if (!r.ef || !r.ef.results) continue;
+        const ef = r.ef.results['實測EF值'];
+        const watt = r.power.filterWh || Infinity;
+        if (ef > bestEf) {
+          bestEf = ef;
+          bestWatt = watt;
+          bestStart = start;
+          bestEnd = end;
+        }
+      }
+      stepsDone = batchEnd;
+      if (showAnim) {
+        showProgress((stepsDone / totalSteps) * 100, '操作中 — 掃描中');
+      }
+      if (stepsDone < totalSteps) {
+        setTimeout(runBatch, 0);
+      } else {
+        scanState.running = false;
+        hideProgress();
+        applyBestResult(bestStart, bestEnd, bestEf, bestWatt, totalSteps);
+      }
+    }
+
+    // 第一批同步執行；若 showAnim=true，分批繼續（runBatch 自己排程）
+    runBatch();
+  }
+
+  /**
+   * 掃描完成：把 X-line 移到最佳區段邊界 + 結果框加註 + cursor 變綠
+   */
+  function applyBestResult(start, end, ef, watt, totalSteps) {
+    // 1. 把結果文字框改成「最佳 24H 區段」摘要 + 完整計算結果
+    const params = getParams();
+    const r = calculateStatistics(parsed, start, end, params);
+    const fmt = (d) => ChartUtils.formatTs(d).replace(/\//g, '/');  // MM/DD HH:MM:SS
+    const banner =
+      `【最佳 24H 區段】\n` +
+      `時間：${fmt(start)} ~ ${fmt(end)}\n` +
+      `EF：${ef}    24H 耗電：${watt} W    (掃描 ${totalSteps} 步)\n` +
+      `\n` +
+      `---\n\n` +
+      formatResult(r);
+    lastResult = banner;
+    document.getElementById('resultText').textContent = lastResult;
+
+    // 2. X-line 移到邊界
+    cursor.setPositions(start, end);
+
+    // 3. cursor overlay 加 .best class（變綠色 highlight）
+    const overlay = document.getElementById('calcCursorOverlay');
+    if (overlay) overlay.classList.add('best');
+
+    // 4. status
+    const elapsedSec = ((performance.now() - scanState.startTs) / 1000).toFixed(2);
+    setStatus(`最佳 EF=${ef}（24H ${watt}W，掃 ${totalSteps} 步 / ${elapsedSec}s）`, 'ok');
   }
 
   function setStatus(text, kind) {
