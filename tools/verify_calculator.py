@@ -476,6 +476,142 @@ console.log(JSON.stringify(stats));
 """
 
 
+# ===========================================================
+# 暴力掃描驗證（slide window）
+# ===========================================================
+
+JS_BRIDGE_SCAN = r"""
+// scanBestWindowBridge：JS 端暴力掃描 1440 分鐘（24H）窗口
+const fs = require('fs');
+const path = require('path');
+
+global.Chart = function () { return { data: { datasets: [] }, scales: {}, chartArea: {}, canvas: { getBoundingClientRect: () => ({ left: 0, right: 0 }) } }; };
+global.ChartUtils = {
+  chartColors: () => ({ text: '', textStrong: '', grid: '', bg: '' }),
+  buildLineChart: () => null,
+  createCursorOverlay: () => null,
+  roundHalfUp: (n, d) => {
+    if (n === null || n === undefined || Number.isNaN(n)) return n;
+    if (d == null) d = 0;
+    const sign = n < 0 ? -1 : 1;
+    const abs = Math.abs(n);
+    const m = Math.pow(10, d);
+    return sign * (Math.floor(abs * m + 0.5) / m);
+  },
+  formatTs: (d) => {
+    if (!d) return '—';
+    const p = (n) => String(n).padStart(2, '0');
+    return `${p(d.getMonth()+1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+  },
+};
+
+const repoRoot = process.env.REPO_ROOT;
+const calcSrc = fs.readFileSync(path.join(repoRoot, 'static/js/calculator.js'), 'utf-8');
+const wrappedSrc = calcSrc + '\nmodule.exports = window.CalculatorAPI;';
+const Module = require('module');
+global.document = {
+  readyState: 'complete',
+  addEventListener: () => {},
+  getElementById: () => null,
+};
+global.window = global;
+const m = new Module('calculator-bridge');
+m._compile(wrappedSrc, 'calculator-bridge.js');
+const CalculatorAPI = m.exports;
+
+const csvFile = process.argv[2];
+const params = JSON.parse(process.argv[3]);
+const STEP = 10;
+const WIN  = 1440;
+
+const csvText = fs.readFileSync(csvFile, 'utf-8');
+const parsed = CalculatorAPI.parseCsv(csvText);
+if (!parsed.ok) { console.error(JSON.stringify({ ok: false, error: parsed.error })); process.exit(1); }
+
+const N = parsed.datetime.length;
+if (N < WIN) { console.error(JSON.stringify({ ok: false, error: 'N < WIN' })); process.exit(1); }
+
+const totalSteps = Math.floor((N - WIN) / STEP) + 1;
+let bestEf = -Infinity, bestWatt = Infinity;
+let bestStart = null, bestEnd = null;
+for (let i = 0; i < totalSteps; i++) {
+  const s = i * STEP;
+  const e = s + WIN - 1;
+  const r = CalculatorAPI.calculateStatistics(parsed, parsed.datetime[s], parsed.datetime[e], params);
+  if (!r.ef || !r.ef.results) continue;
+  const ef = r.ef.results['實測EF值'];
+  const watt = r.power.filterWh || Infinity;
+  if (ef > bestEf) {
+    bestEf = ef;
+    bestWatt = watt;
+    bestStart = parsed.datetime[s].toISOString();
+    bestEnd = parsed.datetime[e].toISOString();
+  }
+}
+console.log(JSON.stringify({
+  totalSteps,
+  bestEf,
+  bestWatt,
+  bestStart,
+  bestEnd,
+}));
+"""
+
+
+def run_js_scan(csv_path, params):
+    params_json = json.dumps(params)
+    script_path = OUT_DIR / "_bridge_scan.js"
+    script_path.write_text(JS_BRIDGE_SCAN)
+    try:
+        result = subprocess.run(
+            ["node", str(script_path), str(csv_path), params_json],
+            cwd=str(REPO_ROOT),
+            capture_output=True, text=True, timeout=120,
+            env={**os.environ, "REPO_ROOT": str(REPO_ROOT)},
+        )
+    finally:
+        if script_path.exists():
+            script_path.unlink()
+    if result.returncode != 0:
+        raise RuntimeError(f"node failed: {result.stderr}")
+    return json.loads(result.stdout)
+
+
+def py_scan_best_window(parsed, params, win=1440, step=10):
+    """暴力掃描：1440 分鐘窗口，每 step 分鐘一動，找最高 EF"""
+    n = len(parsed["rows"])
+    if n < win:
+        return None
+    from datetime import datetime, timedelta
+    total_steps = (n - win) // step + 1
+    best_ef = -float("inf")
+    best_watt = float("inf")
+    best_idx_start = None
+    best_idx_end = None
+    for i in range(total_steps):
+        idx_s = i * step
+        idx_e = idx_s + win - 1
+        start = ts_to_dt(parsed["rows"][idx_s]["datetime"])
+        end = ts_to_dt(parsed["rows"][idx_e]["datetime"])
+        r = py_calculate_statistics(parsed, start, end, params)
+        if not r["ef"] or not r["ef"]["results"]:
+            continue
+        ef = r["ef"]["results"]["實測EF值"]
+        watt = r["power"]["filterWh"] or float("inf")
+        if ef > best_ef:
+            best_ef = ef
+            best_watt = watt
+            best_idx_start = parsed["rows"][idx_s]["datetime"]
+            best_idx_end = parsed["rows"][idx_e]["datetime"]
+    return {
+        "totalSteps": total_steps,
+        "bestEf": best_ef,
+        "bestWatt": best_watt,
+        "bestStart": best_idx_start,
+        "bestEnd": best_idx_end,
+    }
+
+
 def run_js(csv_path, start_dt, end_dt, params):
     """用 Node.js 跑 calculator.js，回傳 JS 版的 stats dict"""
     params_json = json.dumps(params)
@@ -734,6 +870,39 @@ def main():
                 print(f"      {m}")
         else:
             print(f"  [OK] py vs txt 已知輸出完全一致")
+
+        # 8. 滑動視窗掃描驗證（1440 分鐘窗口 / 10 分鐘步進 / 最高 EF）
+        py_scan = py_scan_best_window(parsed, params, win=1440, step=10)
+        js_scan = run_js_scan(csv_path, params)
+        scan_ok = True
+        scan_diffs = []
+        if py_scan and js_scan:
+            for k in ("totalSteps", "bestEf", "bestWatt"):
+                if abs(float(py_scan.get(k, 0)) - float(js_scan.get(k, 0))) > 1e-6:
+                    scan_diffs.append((k, py_scan.get(k), js_scan.get(k)))
+            for k in ("bestStart", "bestEnd"):
+                py_v = py_scan.get(k)
+                js_v = js_scan.get(k)
+                if not py_v or not js_v:
+                    scan_diffs.append((k, py_v, js_v))
+                    continue
+                # 都是 ISO 字串，比較 epoch（忽略時區）
+                from datetime import datetime as _dt
+                py_dt = _dt.fromisoformat(py_v.replace("Z", "+00:00"))
+                js_dt = _dt.fromisoformat(js_v.replace("Z", "+00:00"))
+                if py_dt.timestamp() != js_dt.timestamp():
+                    scan_diffs.append((k, py_v, js_v))
+            print(f"  掃描：steps={py_scan['totalSteps']}  bestEF={py_scan['bestEf']} bestWatt={py_scan['bestWatt']}W  bestStart={py_scan['bestStart']}")
+            if scan_diffs:
+                scan_ok = False
+                print(f"  [SCAN-DIFF] py vs js scan: {len(scan_diffs)} 處差異")
+                for path, pv, jv in scan_diffs:
+                    print(f"      {path}: py={pv!r} js={jv!r}")
+                overall_ok = False
+            else:
+                print(f"  [OK] py vs js scan 最佳區段完全一致")
+        (OUT_DIR / f"{name}_scan_py.json").write_text(json.dumps(py_scan, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+        (OUT_DIR / f"{name}_scan_js.json").write_text(json.dumps(js_scan, ensure_ascii=False, indent=2), encoding="utf-8")
 
         print()
 

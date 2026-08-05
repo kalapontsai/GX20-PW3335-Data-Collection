@@ -1325,3 +1325,41 @@ v10.3.1（commit `b9c810b`）把 5 個白名單從 hardcode 抽離到 `config/se
 - `templates/index.html` — 載入 chart-utils.js（在 main.js 之前）
 - `static/js/main.js` — 共用 ChartUtils.chartColors() / ChartUtils.formatTs()
 - `README.md` — §7.7 文件
+
+
+---
+
+## 18. 現況進度（2026-08-05 計算頁「尋找最佳數據」滑動視窗 v11.1）
+
+**新功能**：「尋找最佳數據」按鈕 — 1440 分鐘（24H）窗口滑動掃描整個資料段，找出 EF 最高的 24H 區段。
+
+**設計決策**：
+- 窗口：1440 分鐘（24H，1 分鐘粒度 = 1440 筆）
+- 步進：10 分鐘（10 筆）→ 1442 筆資料 = 397 步
+- 評分指標：**EF 最高**（同時記錄 watt）
+- EF / Watt 在同參數下**負相關**（Watt 越小 EF 越高），驗證確認（NEW1200: 815W → EF 30.8）
+- 預估時間 > 3 秒才顯示 spinner + 進度條（3 個 H61DV CSV 都不觸發，純本地幾秒內完成）
+
+**使用者體驗**：
+- 按鈕在 topbar 旁「載入範例」右側
+- 掃描中按第二次 = 取消
+- 完成後 X-line 移到最佳區段邊界 + cursor overlay 變綠色 highlight
+- 結果文字框加「【最佳 24H 區段】時間 / EF / 24H 耗電 / 掃描步數」摘要
+
+**演算法細節**：
+- 預估：先跑 50 步量時間，線性外推總時間
+- 分批執行：`setTimeout(fn, 0)` 200 步一批，避免卡 UI thread
+- 完成時 cursor overlay 加 `.best` class（CSS 變綠色）+ X-line 重設位置
+
+**檔案清單**：
+- `templates/calculator.html` — topbar 加 findBestBtn
+- `static/css/style.css` — `.calc-progress-overlay` + `.cursor-overlay.best` 樣式
+- `static/js/calculator.js` — `runBestWindowScan()` + `applyBestResult()` + 動態注入 progress overlay
+- `tools/verify_calculator.py` — `py_scan_best_window()` + `JS_BRIDGE_SCAN` + `run_js_scan()` + main 內自動跑
+- `README.md` §7.7 補上「尋找最佳數據」段
+
+**驗證結果**（3 個 CSV）：
+- NEW1200  : steps=397  bestEF=30.8  bestWatt=815 W  bestStart=2026-08-01T06:46:00
+- OLD1200  : steps=397  bestEF=29.6  bestWatt=843 W  bestStart=2026-08-01T05:45:00
+- VIP800   : steps=397  bestEF=29.6  bestWatt=843 W  bestStart=2026-08-01T05:45:00
+- Py vs JS 掃描結果 3/3 完全一致
