@@ -24,6 +24,7 @@
 14. [現況進度（2026-07-24 取消 PW3335 『啟用』開關 v10.2）](#14-現況進度2026-07-24-取消-pw3335-啟用-開關-v102)
 15. [現況進度（2026-07-27 行動簡式頁面 /mobile v10.3）](#15-現況進度2026-07-27-行動簡式頁面-mobile-v103)
 16. [現況進度（2026-07-30 whitelist save/load 鏈修補 v10.3.2）](#16-現況進度2026-07-30-whitelist-saveload-鏈修補-v1032)
+17. [現況進度（2026-08-05 計算頁 /calculator v11）](#17-現況進度2026-08-05-計算頁-calculator-v11)
 
 ---
 
@@ -1278,3 +1279,49 @@ v10.3.1（commit `b9c810b`）把 5 個白名單從 hardcode 抽離到 `config/se
 **Commit 鏈**：
 
 - `<待 commit>` — fix(whitelist): save/load 鏈補上 whitelist patch 處理（save_settings 分支 + load_settings merge + B 方案非 dict 容錯）
+
+
+---
+
+## 17. 現況進度（2026-08-05 計算頁 /calculator v11）
+
+**新功能**：把桌面版 `plot_gui_雙信.py` 的離線 EF 計算搬到 Web。
+
+**使用者流程**：
+1. `/` 按「儲存 CSV」 → 在 Excel 編輯（去空白頻道 / 刪時段）
+2. 直接 URL 進入 `/calculator`（不從 topbar 進入）
+3. 上傳 CSV → 圖表即時畫出
+4. 拖曳兩條 X-line 選計算區間 → 右下結果文字框即時更新
+5. 按「儲存結果」 → 瀏覽器原生下載對話框（`.txt`）
+
+**EF 演算法**：完全 1:1 移植 `EnergyCalculator.calculate()` 與 `calculate_statistics()`：
+- fridge_type 5 個分支（VF=0 / fan × {eqV<400, eqV≥400}）
+- 2018 / 2027 thresholds（type 5 用 1.72/1.54/... vs 1-4 用 1.6/1.45/...）
+- grade 規則含 `1*級`（≥T0 × 0.95）
+- ON/OFF 週期：cycles、above/below 平均分鐘、百分比（含 `int(avg/60) + 1` 的「Off 加 1」規則）
+- `round half-up`（5 永遠進位）— 不用 JS `Math.round`（banker's rounding）
+
+**共用底層抽離**：
+- `static/js/chart-utils.js` 抽出 chart init / cursor overlay / roundHalfUp / chartColors
+- `main.js` 改成呼叫 ChartUtils.chartColors() + ChartUtils.formatTs()（保守做法，不破壞既有行為）
+- `/calculator` 共用整個 chart-utils.js（chart init + cursor overlay 都從這裡建）
+
+**驗證**：
+- `tools/verify_calculator.py` 跑 3 個 H61DV CSV（NEW1200 / OLD1200 / VIP800，1442 列/24h）
+- Python 原版 vs JS 版 **完全 1:1 一致**（EF 22 個欄位、ON/OFF 統計、電力計算）
+- 容忍浮點誤差 1e-9 + ISO 字串時區序列化差異（Python `+08:00` vs JS `Z`）
+
+**節點位置**：
+- 不在 `/` topbar 加「計算」按鈕
+- 使用者透過 URL `/calculator` 或瀏覽器書籤進入
+
+**檔案清單**：
+- `templates/calculator.html` — 計算頁主畫面
+- `static/js/calculator.js` — CSV parser / statistics / EF（純前端，755 行）
+- `static/js/chart-utils.js` — 共用 chart API（v11 新增，292 行）
+- `static/css/style.css` — `v11.x：/calculator 計算頁` 區段（78 行）
+- `tools/verify_calculator.py` — Python + JS 驗證工具（752 行）
+- `app.py` — 加 `GET /calculator` route
+- `templates/index.html` — 載入 chart-utils.js（在 main.js 之前）
+- `static/js/main.js` — 共用 ChartUtils.chartColors() / ChartUtils.formatTs()
+- `README.md` — §7.7 文件

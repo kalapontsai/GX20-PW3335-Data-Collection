@@ -479,6 +479,72 @@ GX20State.setTheme(t) → 立即切換主題
 
 `window.lttb(data, threshold)` 對 `{x, y}` 陣列降取樣。當前端 dataset 超過上限時保險用。
 
+### 7.7 `/calculator` 計算頁（v11）
+
+#### 設計動機
+
+桌面版 `plot_gui_雙信.py` 是離線分析工具（選 xls → 突波清洗 → 拉線 → EF 計算 → 存結果）。
+Web 版之前只能在 `/snapshot` 看歷史備份，但無法：
+- 手動刪空白頻道或不要的時段
+- 重算 EF 用自訂參數（VF/VR/溫度/fan_type/OnOfTh）
+
+`/calculator` 就是把桌面版功能搬到 Web：
+- 使用者在 `/` 按「儲存 CSV」 → 在 Excel 編輯 → 上傳到 `/calculator`
+- 在圖表上拖曳兩條 X-line 選計算區間 → 即時算出 ON/OFF 統計 + EF 結果
+- 按「儲存結果」 → 跳出下載對話框，存成 `.txt`
+
+#### 節點位置（v11）
+
+依大大指示「不用, 由使用者自行儲存節點位置」：
+- **不在 `/` topbar 加「計算」按鈕**
+- 使用者透過 URL 直接進入 `/calculator`（或瀏覽器書籤）
+
+#### 演算法 1:1 移植自 Python 原版
+
+EF 演算法完全照 `kalapontsai/Data-plot-and-EEF-calculate` 的 `plot_gui_雙信.py`：
+- `EnergyCalculator.calculate()`：VF/VR/K/fridge_type 5 個分支、2018/2027 thresholds、grade 規則（含 `1*級` 95%）
+- `calculate_statistics()`：平均/最大/最小、ON/OFF 週期、電力消耗、wp24hW 換算
+- `round half-up`：5 永遠進位（不採 banker's），跟 Python 一致
+
+驗證：3 個 H61DV CSV（NEW1200 / OLD1200 / VIP800，1442 列/24h）跑 `tools/verify_calculator.py`，
+**Python 版跟 JS 版 EF/ONOFF/電力 完全 1:1 一致**。
+
+#### 共用程式碼
+
+- `static/js/chart-utils.js`：抽 chart init / cursor overlay / round half-up 等共用 API
+  - `/`（main.js）+ `/calculator`（calculator.js）共用
+  - main.js 只換 `chartColors()` 跟 `_fmtTs()` 兩個小函式用 chart-utils 版本（保守做法，不破壞既有行為）
+
+#### 檔案清單
+
+| 檔案 | 用途 |
+|---|---|
+| `templates/calculator.html` | 計算頁主畫面（圖表 + 參數面板 + 結果文字框） |
+| `static/js/calculator.js` | CSV parser / statistics / EF（純前端） |
+| `static/js/chart-utils.js` | 共用 chart API |
+| `tools/verify_calculator.py` | Python 原版 + JS 版 diff 驗證工具 |
+
+#### 路由
+
+`GET /calculator`（純前端頁面，不需要 IP 白名單、不需要 OTA token）：
+```python
+@app.route("/calculator")
+def calculator_page():
+    return render_template("calculator.html", stations=STATIONS, points_per_station=POINTS_PER_STATION)
+```
+
+#### 驗證
+
+```bash
+cd ~/.openclaw/workspace-two/repos/GX20-PW3335-Data-Collection
+python3 tools/verify_calculator.py          # 3 個 CSV 全跑
+python3 tools/verify_calculator.py NEW1200   # 只跑一個
+```
+
+驗證工具內含「Python 原版 EF 演算法」（從 plot_gui_雙信.py 移植），
+透過 Node.js + Module shim 載入 calculator.js 並跑 CalculatorAPI，
+欄位對欄位 diff（容忍浮點 1e-9 + 時區序列化差異）。
+
 ---
 
 ## 8. 設定同步檔 config/settings.json
