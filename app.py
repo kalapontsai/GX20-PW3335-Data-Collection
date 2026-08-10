@@ -286,8 +286,8 @@ def load_settings() -> dict:
         for st in STATIONS:
             v = notes_raw.get(st)
             if isinstance(v, str):
-                # 截斷到 20 字（前端 maxlength=20 防線）
-                merged_notes[st] = v[:20]
+                # 截斷到 30 字（前端 maxlength=30 防線）
+                merged_notes[st] = v[:30]
             elif v is None:
                 merged_notes[st] = ""
         out["notes"] = merged_notes
@@ -461,7 +461,7 @@ def save_settings(patch: dict) -> None:
                 existing = config.default_settings()["notes"]
             for st, val in v.items():
                 if st in STATIONS and isinstance(val, str):
-                    existing[st] = val[:20]  # 與 load_settings 一致的截斷
+                    existing[st] = val[:30]  # 與 load_settings 一致的截斷
             storage.set_setting("notes", config.to_json(existing))
         elif k == "whitelist":
             # v10.3.x：whitelist = {cors_origins, ota_admin_ips, remote_write_ips,

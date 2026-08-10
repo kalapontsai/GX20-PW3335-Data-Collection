@@ -92,8 +92,8 @@ async function init() {
     loadNoteForCurrentStation();
     // oninput 實時 update（GX20State.update 內有 300ms debounce auto-save）
     noteBoxEl.addEventListener("input", () => {
-      // 截斷到 20 字（跟 HTML maxlength 一致，貼上可能略過 maxlength）
-      const v = noteBoxEl.value.slice(0, 20);
+      // 截斷到 30 字（跟 HTML maxlength 一致，貼上可能略過 maxlength）
+      const v = noteBoxEl.value.slice(0, 30);
       const cur = (GX20State.settings.notes || {})[currentStation] || "";
       if (cur === v) return;
       const next = Object.assign({}, GX20State.settings.notes || {}, { [currentStation]: v });
@@ -236,7 +236,7 @@ function saveNoteForStation(stationKey) {
   if (!box || !GX20State.settings) return;
   const notes = GX20State.settings.notes || {};
   if (notes[stationKey] !== box.value) {
-    const next = Object.assign({}, notes, { [stationKey]: box.value.slice(0, 20) });
+    const next = Object.assign({}, notes, { [stationKey]: box.value.slice(0, 30) });
     GX20State.update("notes", next);
   }
 }
