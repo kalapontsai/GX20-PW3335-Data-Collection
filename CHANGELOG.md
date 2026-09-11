@@ -25,6 +25,7 @@
 15. [現況進度（2026-07-27 行動簡式頁面 /mobile v10.3）](#15-現況進度2026-07-27-行動簡式頁面-mobile-v103)
 16. [現況進度（2026-07-30 whitelist save/load 鏈修補 v10.3.2）](#16-現況進度2026-07-30-whitelist-saveload-鏈修補-v1032)
 17. [現況進度（2026-08-05 計算頁 /calculator v11）](#17-現況進度2026-08-05-計算頁-calculator-v11)
+18. [現況進度（2026-09-11 設定重開機還原 bug 修補 v10.4）](#18-現況進度2026-09-11-設定重開機還原-bug-修補-v104)
 
 ---
 
@@ -1363,3 +1364,80 @@ v10.3.1（commit `b9c810b`）把 5 個白名單從 hardcode 抽離到 `config/se
 - OLD1200  : steps=397  bestEF=29.6  bestWatt=843 W  bestStart=2026-08-01T05:45:00
 - VIP800   : steps=397  bestEF=29.6  bestWatt=843 W  bestStart=2026-08-01T05:45:00
 - Py vs JS 掃描結果 3/3 完全一致
+
+---
+
+## 18. 現況進度（2026-09-11 設定重開機還原 bug 修補 v10.4）
+
+**Bug**（大大 09:43 回報）：
+  重開機後 /settings 內「Y 軸範圍」「PW 軸」「PW3335 IP」「備註」等恢復成預設值，但「ch_alias / ch_visibility / ch_color」仍保留自訂。
+
+**根因**：
+  `apply_json_to_sqlite()`（app.py:530 起）在每次啟動時讀 `config/settings.json` 寫回 SQLite。原本實作：
+
+```python
+for k, v in d.items():
+    if k in ("ch_visibility", "ch_alias", "ch_color"):
+        if isinstance(v, dict):
+            storage.set_setting(k, config.to_json(v))   # ← 對這 3 個顯式保護
+        else:
+            storage.set_setting(k, config.to_json(defaults.get(k, {})))
+    else:
+        storage.set_setting(k, str(v))   # ← BUG：dict 走 str() → Python repr 單引號
+```
+
+當 v 是 dict 時（例如 y_axis = `{"工位1": {"min": 0, "max": 50}}`），`str(v)` 產出 Python repr 用單引號：
+```python
+>>> str({"工位1": {"min": 0, "max": 50, "auto": False}})
+"{'工位1': {'min': 0, 'max': 50, 'auto': False}}"   # ← 不是合法 JSON
+```
+
+寫進 SQLite 後，下次 `config.from_json(raw)` 跑 `json.loads(...)` 因單引號失敗 → silently fallback 到 default → load_settings 回傳預設值。
+
+**受影響欄位**（不包含顯式保護的 ch_visibility/alias/color）：
+- `y_axis`（dict-of-dict）— 最容易觀察，每工位的 Y 軸上下限丟掉
+- `pw_axis`（dict-of-dict，每工位含 v/i/w）
+- `pw3335`（nested dict，port + hosts + colors）
+- `notes`（dict-of-str）
+- `whitelist`（雖然 load_settings 內 merge DEFAULTS 兜底，但 SQLite 內存的是壞字串）
+
+**未受影響**（已有顯式保護）：
+- `ch_visibility` / `ch_alias` / `ch_color`（在 if 分支內用 `config.to_json`）
+
+**修法**（v10.4 變更，app.py `apply_json_to_sqlite`）：
+  對 `isinstance(v, (dict, list))` 改用 `config.to_json(v)`（產生合法 JSON 雙引號），與 `save_settings()` 內部 `set_setting(..., config.to_json(existing))` 對齊。Scalar（str/int/bool）照舊走 `str(v)`。
+
+```python
+for k, v in d.items():
+    if k in ("ch_visibility", "ch_alias", "ch_color"):
+        # 原顯式保護保留
+        if isinstance(v, dict):
+            storage.set_setting(k, config.to_json(v))
+        else:
+            storage.set_setting(k, config.to_json(defaults.get(k, {})))
+    elif isinstance(v, (dict, list)):   # ← 新分支：dict/list 走 to_json
+        storage.set_setting(k, config.to_json(v))
+    else:
+        storage.set_setting(k, str(v))
+```
+
+**驗證**（`tests/test_apply_json_to_sqlite_v10_4_repro.py`，4 個 shape）：
+- shape 1：y_axis 工位1 自訂 `{min:0, max:50, auto:False}` 跨 startup 後保留 ✓
+- shape 2：pw_axis 工位3.v 自訂 `{min:0, max:240, auto:False}` 跨 startup 後保留 ✓
+- shape 3：notes 工位1「H61DV VIP-800改風道」跨 startup 後保留 ✓
+- shape 4：pw3335 自訂 port=3301 / hosts=10.20.30.x / colors.V=綠 跨 startup 後保留 ✓
+
+修前 ✗ 7/8，修後 ✓ 8/8。`test_whitelist_save_repro.py`（既有 29 個 ✓）+ `test_pw3335_v10_2_repro.py`（既有 5 個 ✓）+ `test_snapshot.py`（既有 20 tests OK）皆無 regression。
+
+**已知不會自動回填已被還原成預設值的資料**：
+  本次 fix 只保證「重啟後不再丟資料」。**已經被歷次 OTA-restart 還原成預設值的欄位**（y_axis / pw_axis / pw3335 / notes 在 SQLite 內現存的是壞字串），需要使用者重新進 /settings 頁 → 設成想要的值 → 按保存。save_settings() 會用 `config.to_json()` 寫進 SQLite + dump JSON，下次重啟就會正確 round-trip。
+
+**教訓**（進 SOUL/AGENTS）：
+  改 save / load chain 必須 repro script 灌真實 shape 跑關鍵 function。**`str(dict)` 不是合法 JSON** 這種小細節，靠 `py_compile` 抓不到（語法對、型別對），靠 Playwright 也看不到（表面 round-trip 沒事，反正「存了、讀了、看起來一樣」）。必須 unit test 用「存 → 重啟 → 再讀」的 round-trip 才抓得到。參考 MEMORY.md 政策 2b8de47 ring tuple unpack 慘案。
+
+**檔案清單**：
+- `app.py` — `apply_json_to_sqlite()` 加 `elif isinstance(v, (dict, list))` 分支（+11/-1）
+- `tests/test_apply_json_to_sqlite_v10_4_repro.py` — 4-shape repro 測試（新檔）
+
+**部署**：
+  透過 OTA 推送 `app.py` 單檔到 `D:\sampo\GX20-PW3335-Data-Collection\app.py`，restart。Token 指紋 `750f9385`。

@@ -531,7 +531,12 @@ def apply_json_to_sqlite(d: dict) -> None:
     把 JSON 內的設定寫進 SQLite（寫進後 load_settings() 仍以 SQLite 為主）
     - 以 JSON 內容為準
     - 動底欄位 (ch_visibility/alias/color) 以 JSON 內的 dict 完整覆寫
-    - 其他欄位以 str() 儲存
+    - 其他欄位依型別處理：dict/list → config.to_json()（保留原始 JSON 雙引號以利
+      下次 from_json 解析回 dict）；scalar → str()。
+    v10.4+ 修：原本一律 str(v)，會把 dict 變成 Python repr（單引號），
+      例如 "{'工位1': {'min': 0}}"，下次 config.from_json 解析失敗 → fallback
+      到 default → 重開機後 y_axis / pw_axis / pw3335 / notes / whitelist
+      等「已客製」的設定全部還原成預設值。
     """
     defaults = config.default_settings()
     for k, v in d.items():
@@ -541,7 +546,12 @@ def apply_json_to_sqlite(d: dict) -> None:
                 storage.set_setting(k, config.to_json(v))
             else:
                 storage.set_setting(k, config.to_json(defaults.get(k, {})))
+        elif isinstance(v, (dict, list)):
+            # v10.4+：dict/list 型別用 to_json，產出合法 JSON（雙引號）。
+            # save_settings() 內部也是用 to_json，兩邊型別處理對齊。
+            storage.set_setting(k, config.to_json(v))
         else:
+            # scalar（str/int/bool）照舊用 str()
             storage.set_setting(k, str(v))
 
 
