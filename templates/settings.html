@@ -6,7 +6,7 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <title>GX20 設定</title>
-<link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=2">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=3">
 </head>
 <body data-theme="light">
 
@@ -272,8 +272,8 @@
   .btn-secondary:hover { background: #7f8c8d; }
 </style>
 
-<script src="{{ url_for('static', filename='js/storage.js') }}?v=2"></script>
-<script src="{{ url_for('static', filename='js/colorpicker.js') }}?v=2"></script>
+<script src="{{ url_for('static', filename='js/storage.js') }}?v=3"></script>
+<script src="{{ url_for('static', filename='js/colorpicker.js') }}?v=3"></script>
 <script>
   // 從 server 端模板注入（全頁共用的設定）
   window.GX20Config = {
@@ -281,6 +281,6 @@
     points:   {{ points_per_station }},
   };
 </script>
-<script src="{{ url_for('static', filename='js/settings.js') }}?v=2"></script>
+<script src="{{ url_for('static', filename='js/settings.js') }}?v=3"></script>
 </body>
 </html>

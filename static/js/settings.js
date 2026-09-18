@@ -198,6 +198,10 @@ function renderChGrid() {
     num.innerHTML = `<span>#${i+1}</span> <span class="ch-num-code">${channelNums[currentStation]?.[i] || ""}</span>`;
     cell.appendChild(num);
 
+    // 並排：顯示 checkbox + Volt 開關（v12.0）
+    const toggleRow = document.createElement("div");
+    toggleRow.className = "ch-toggle-row";
+
     // 顯示/隱藏
     const visLabel = document.createElement("label");
     visLabel.className = "ch-field";
@@ -215,7 +219,30 @@ function renderChGrid() {
     visTxt.className = "ch-field-label";
     visTxt.textContent = "顯示";
     visLabel.appendChild(visTxt);
-    cell.appendChild(visLabel);
+    toggleRow.appendChild(visLabel);
+
+    // Volt 開關（v12.0：ch_source[currentStation][i] = "V" → 3 位小數電壓顯示）
+    const voltLabel = document.createElement("label");
+    voltLabel.className = "ch-field switch-field";
+    const voltSw = document.createElement("input");
+    voltSw.type = "checkbox";
+    voltSw.className = "volt-chk";
+    voltSw.checked = (settings.ch_source[currentStation][i] === "V");
+    voltSw.addEventListener("change", () => {
+      settings.ch_source[currentStation][i] = voltSw.checked ? "V" : "TC";
+      GX20State.update("ch_source", settings.ch_source);
+    });
+    const voltSlider = document.createElement("span");
+    voltSlider.className = "switch-slider";
+    const voltTxt = document.createElement("span");
+    voltTxt.className = "ch-field-label";
+    voltTxt.textContent = "Volt";
+    voltLabel.appendChild(voltSw);     // 隱藏的 checkbox
+    voltLabel.appendChild(voltSlider); // 視覺上的開關本體
+    voltLabel.appendChild(voltTxt);    // 文字標籤
+    toggleRow.appendChild(voltLabel);
+
+    cell.appendChild(toggleRow);
 
     // 別名（明確標籤 + 文字框）
     const aliasWrap = document.createElement("div");

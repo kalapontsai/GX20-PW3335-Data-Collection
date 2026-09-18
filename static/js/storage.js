@@ -70,6 +70,7 @@
       pw3335:          sess.pw3335,          // v7：PW3335 整體設定
       pw_axis:         sess.pw_axis,         // v7：電力 Y 軸 per-station
       notes:           sess.notes,           // v10.x：備註欄 per-station
+      ch_source:       sess.ch_source,       // v12.0：per-station/per-channel 訊號源（TC / V）
       theme:         sess.theme,
     };
     if (saved === null) {
@@ -218,6 +219,7 @@
         pw3335:         this.settings.pw3335,        // v7：PW3335
         pw_axis:        this.settings.pw_axis,       // v7：電力 Y 軸
         notes:          this.settings.notes,         // v10.x：備註欄 per-station
+        ch_source:      this.settings.ch_source,     // v12.0：TC / V 訊號源
         theme:          this.theme,
       };
       const r = await fetch("/api/settings", {
@@ -243,6 +245,7 @@
       this.sess.pw3335          = payload.pw3335;     // v7
       this.sess.pw_axis         = payload.pw_axis;    // v7
       this.sess.notes           = payload.notes;      // v10.x
+      this.sess.ch_source       = payload.ch_source;  // v12.0
       this.sess.theme          = payload.theme;
       // 記下「已保存的快照」供 dirty 比較
       this.sess._saved = {
@@ -260,6 +263,7 @@
         pw3335:          payload.pw3335,           // v7
         pw_axis:         payload.pw_axis,          // v7
         notes:           payload.notes,            // v10.x
+        ch_source:       payload.ch_source,        // v12.0
         theme:         payload.theme,
       };
       sessionStorage.setItem(SESSION_KEY, JSON.stringify(this.sess));

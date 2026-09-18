@@ -1119,16 +1119,25 @@ function updateReadoutTable(payload) {
     const v = payload.temps[i];
     const r = payload.rate ? payload.rate[i] : null;
     const a = payload.avg  ? payload.avg[i]  : null;
+    // v12.0：V 通道 3 位小數（電壓精度）；TC 維持 1 位小數
+    const digits = _digitsForChannel(i);
     const tr = document.createElement("tr");
     tr.innerHTML = `
       <td>${i+1}</td>
       <td><span class="swatch" style="background:${color}"></span>${escapeHtml(name)}</td>
-      <td>${fmt(v, 1)}</td>
+      <td>${fmt(v, digits)}</td>
       <td>${fmtRate(r)}</td>
-      <td>${fmt(a, 2)}</td>
+      <td>${fmt(a, digits)}</td>
     `;
     tbody.appendChild(tr);
   }
+}
+
+// v12.0：依 ch_source 決定小數位。V → 3（電壓精度），TC → 1（溫度預設）
+function _digitsForChannel(i) {
+  const src = (GX20State.settings && GX20State.settings.ch_source
+               && GX20State.settings.ch_source[currentStation]) || [];
+  return src[i] === "V" ? 3 : 1;
 }
 
 // =============================================================
@@ -1575,9 +1584,11 @@ function updateReadoutFromCursor() {
     // 量測模式加 max / min 兩欄需要更動表頭；為了不破壞既有表頭結構，
     // 把 max / min 放進同一個 cell 內以「(max~min)」格式呈現。
     // 但會擠；先維持簡單：另存到 data-* 屬性，後續可擴充。
-    tr.dataset.max = max == null ? "" : max.toFixed(2);
-    tr.dataset.min = min == null ? "" : min.toFixed(2);
-    tr.dataset.avg = avg  == null ? "" : avg.toFixed(2);
+    // v12.0：V 通道 3 位小數，TC 維持 2 位
+    const digits = _digitsForChannel(i);
+    tr.dataset.max = max == null ? "" : max.toFixed(digits);
+    tr.dataset.min = min == null ? "" : min.toFixed(digits);
+    tr.dataset.avg = avg  == null ? "" : avg.toFixed(digits);
     tbody.appendChild(tr);
   }
   // 表頭改為量測模式：把 "讀值/速率/平均" 換成 "平均/最大/最小"
@@ -1671,13 +1682,15 @@ function _updateReadoutTableOriginal(payload) {
     const v = payload.temps[i];
     const r = payload.rate ? payload.rate[i] : null;
     const a = payload.avg  ? payload.avg[i]  : null;
+    // v12.0：V 通道 3 位小數；TC 維持 1 位
+    const digits = _digitsForChannel(i);
     const tr = document.createElement("tr");
     tr.innerHTML = `
       <td>${i+1}</td>
       <td><span class="swatch" style="background:${color}"></span>${escapeHtml(name)}</td>
-      <td>${fmt(v, 1)}</td>
+      <td>${fmt(v, digits)}</td>
       <td>${fmtRate(r)}</td>
-      <td>${fmt(a, 2)}</td>
+      <td>${fmt(a, digits)}</td>
     `;
     tbody.appendChild(tr);
   }
