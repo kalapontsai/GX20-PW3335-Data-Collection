@@ -132,7 +132,8 @@ class GX20:
                         if channel in ch_list:
                             idx = ch_list.index(channel)
                             self.channels_temp[station_name][idx] = (
-                                round(value, 1) if value is not None else 999.9
+                                round(value, 3 if channel in self.voltage_channels else 1)
+                                if value is not None else 999.9
                             )
                             break
             return self.channels_temp
