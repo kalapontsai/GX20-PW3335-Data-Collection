@@ -44,6 +44,8 @@ CHANNEL_NUMBER: Dict[str, List[str]] = {
     "工位6": ["1101", "1102", "1103", "1104", "1105", "1106", "1107", "1108", "1109", "1110",
               "1201", "1202", "1203", "1204", "1205", "1206", "1207", "1208", "1209", "1210"],
 }
+VOLTAGE_UNITS = {"V", "DCV", "VDC"}
+DEFAULT_VOLTAGE_CHANNELS = {"0610"}
 STATIONS = list(CHANNEL_NUMBER.keys())            # ["工位1", ..., "工位6"]
 POINTS_PER_STATION = 20
 
@@ -58,11 +60,15 @@ DEFAULT_COLORS = [
 class GX20:
     """單一 GX20 記錄器的通訊客戶端。"""
 
-    def __init__(self, host: str = "192.168.1.1", port: int = 34434, timeout: float = 3.0):
+    def __init__(self, host: str = "192.168.1.1", port: int = 34434,
+                 timeout: float = 3.0, voltage_channels=None):
         self.gsRemoteHost = host
         self.gnRemotePort = port
         self.timeout = timeout
         self.channel_number = CHANNEL_NUMBER
+        self.voltage_channels = set(
+            DEFAULT_VOLTAGE_CHANNELS if voltage_channels is None else voltage_channels
+        )
         # 當前快取（最近一次成功讀取的值）
         self.channels_temp: Dict[str, List[Optional[float]]] = {
             s: [None] * POINTS_PER_STATION for s in STATIONS
@@ -72,27 +78,33 @@ class GX20:
 
     @staticmethod
     def parse_scientific_notation(value_str: str) -> Optional[float]:
-        """解析科學記號；非數字或 > 999 回傳 None。"""
+        """解析 GX20 數值；非數字或超過合理範圍回傳 None。"""
         try:
-            if "E" in value_str:
-                base, exp = value_str.split("E")
-                value = float(base) * (10 ** int(exp))
-                return None if value > 999 else value
+            value = float(value_str.strip())
+            return None if abs(value) > 999 else value
         except (ValueError, TypeError):
             return None
-        return None
 
     @staticmethod
     def parse_channel_data(line: str) -> Optional[dict]:
-        """解析 31-char 固定格式的一行頻道資料。"""
-        if len(line) != 31:
+        """解析 GX20 固定欄位資料，兼容電壓行較長的格式。"""
+        if len(line) < 19 or len(line) < 6 or not line[2:6].strip():
             return None
         return {
             "type":    line[0],
             "channel": line[2:6],
             "unit":    line[10:18].strip(),
-            "value_str": line[18] + line[19:31],
+            "value_str": line[18:].strip(),
         }
+
+    @classmethod
+    def parse_channel_value(cls, parsed: dict, voltage_channels=None) -> Optional[float]:
+        """依設定的訊號源解析數值；電壓頻道只接受電壓單位。"""
+        unit = parsed["unit"].upper().replace(" ", "")
+        channels = DEFAULT_VOLTAGE_CHANNELS if voltage_channels is None else set(voltage_channels)
+        if parsed["channel"] in channels and unit not in VOLTAGE_UNITS:
+            return None
+        return cls.parse_scientific_notation(parsed["value_str"])
 
     # ---------- 主通訊 ----------
 
@@ -114,7 +126,7 @@ class GX20:
                     if not parsed:
                         continue
                     channel = parsed["channel"]
-                    value = self.parse_scientific_notation(parsed["value_str"])
+                    value = self.parse_channel_value(parsed, self.voltage_channels)
                     # 找該 channel 屬於哪個工位的哪個 index
                     for station_name, ch_list in self.channel_number.items():
                         if channel in ch_list:

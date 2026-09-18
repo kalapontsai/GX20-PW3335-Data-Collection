@@ -279,6 +279,20 @@ def load_settings() -> dict:
                     merged[st] = v[st]
             out[k] = merged
 
+    source_raw = config.from_json(raw.get("ch_source"), default=defaults["ch_source"])
+    if isinstance(source_raw, dict):
+        merged_source = {st: list(defaults["ch_source"][st]) for st in STATIONS}
+        for st in STATIONS:
+            values = source_raw.get(st)
+            if not isinstance(values, list):
+                continue
+            normalized = [
+                value if value in ("TC", "V") else defaults["ch_source"][st][i]
+                for i, value in enumerate(values[:POINTS_PER_STATION])
+            ]
+            merged_source[st][:len(normalized)] = normalized
+        out["ch_source"] = merged_source
+
     # v10.x：備註欄（per-station 字串，上限 20 字，跟 alias 一樣跨瀏覽器同步）
     notes_raw = config.from_json(raw.get("notes"), default=defaults["notes"])
     if isinstance(notes_raw, dict):
@@ -444,7 +458,7 @@ def save_settings(patch: dict) -> None:
                     if isinstance(cv, str) and cv.strip():
                         existing["colors"][key] = cv.strip()
             storage.set_setting("pw3335", config.to_json(existing))
-        elif k in ("ch_visibility", "ch_alias", "ch_color") and isinstance(v, dict):
+        elif k in ("ch_visibility", "ch_alias", "ch_color", "ch_source") and isinstance(v, dict):
             existing_raw = storage.get_setting(k)
             existing = config.from_json(existing_raw, default=config.default_settings()[k])
             if not isinstance(existing, dict):
@@ -676,7 +690,16 @@ def poller() -> None:
         state["poller_running"] = True
 
     s = load_settings()
-    state["gx20"] = GX20(host=s["gx20_host"], port=int(s["gx20_port"]))
+    voltage_channels = {
+        channel
+        for station, sources in s["ch_source"].items()
+        for index, channel in enumerate(CHANNEL_NUMBER[station])
+        if index < len(sources) and sources[index] == "V"
+    }
+    state["gx20"] = GX20(
+        host=s["gx20_host"], port=int(s["gx20_port"]),
+        voltage_channels=voltage_channels,
+    )
     log.info("GX20 連線實例建立: %s:%s", s["gx20_host"], s["gx20_port"])
 
     round_no = 0
@@ -686,11 +709,22 @@ def poller() -> None:
         try:
             s = load_settings()
             gx = state["gx20"]
-            if gx.gsRemoteHost != s["gx20_host"] or gx.gnRemotePort != int(s["gx20_port"]):
+            voltage_channels = {
+                channel
+                for station, sources in s["ch_source"].items()
+                for index, channel in enumerate(CHANNEL_NUMBER[station])
+                if index < len(sources) and sources[index] == "V"
+            }
+            if (gx.gsRemoteHost != s["gx20_host"]
+                    or gx.gnRemotePort != int(s["gx20_port"])
+                    or gx.voltage_channels != voltage_channels):
                 log.info("GX20 連線設定變更 %s:%s → %s:%s",
                          gx.gsRemoteHost, gx.gnRemotePort,
                          s["gx20_host"], s["gx20_port"])
-                gx = GX20(host=s["gx20_host"], port=int(s["gx20_port"]))
+                gx = GX20(
+                    host=s["gx20_host"], port=int(s["gx20_port"]),
+                    voltage_channels=voltage_channels,
+                )
                 with state["lock"]:
                     state["gx20"] = gx
 

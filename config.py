@@ -143,6 +143,10 @@ def default_pw_axis() -> dict:
 
 # ---------- 預設完整設定 dict（給 settings 頁初始化用） ----------
 def default_settings() -> dict:
+    default_sources = {
+        station: ["V" if channel == "0610" else "TC" for channel in channels]
+        for station, channels in CHANNEL_NUMBER.items()
+    }
     return {
         "gx20_host":      DEFAULT_GX20_HOST,
         "gx20_port":      DEFAULT_GX20_PORT,
@@ -152,6 +156,7 @@ def default_settings() -> dict:
         "avg_window_min":  DEFAULT_AVG_WINDOW_MIN,
         "ch_visibility":  default_visibility(),
         "ch_alias":       default_alias(),
+        "ch_source":      default_sources,
         "ch_color":       default_color(),
         "theme":          DEFAULT_THEME,
         "retention_days": DEFAULT_RETENTION_DAYS,
