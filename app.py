@@ -57,7 +57,7 @@ import time
 from collections import deque
 from datetime import datetime, timedelta
 from decimal import Decimal, ROUND_HALF_UP
-from typing import Dict, List, Optional, Deque
+from typing import Any, Dict, List, Optional, Deque
 
 from flask import Flask, jsonify, render_template, request, send_from_directory, Response
 from flask_socketio import SocketIO
@@ -1606,6 +1606,8 @@ def api_export_csv(station: str):
       - 該分鐘內若有任一筆 v/i/w 為 None → 該分鐘該欄輸出空字串
         （區分「該分鐘確實都是 0」v.s.「該分鐘沒拉到電力」）
       - Decimal 累加 + ROUND_HALF_UP（與溫度同邏輯，避免 IEEE 754 誤差）
+        GX20 channel：
+            - Volt channel 小數 3 位；TC channel 小數 1 位
     """
     if station not in STATIONS:
         return jsonify({"ok": False, "error": "unknown station"}), 404
@@ -1633,6 +1635,7 @@ def api_export_csv(station: str):
 
     # 取得別名
     aliases = s.get("ch_alias", {}).get(station, [])
+    channel_sources = s.get("ch_source", {}).get(station, [])
 
     # 造標頭（v7：加 V, I, W）
     headers = ["datetime"]
@@ -1712,10 +1715,12 @@ def api_export_csv(station: str):
         row = [ts_str]
         for i in range(20):
             if b["any"][i]:
-                # 小數第二位四捨五入，輸出小數一位（ROUND_HALF_UP：5 永遠進位）
+                # Volt 小數三位；TC 小數一位（ROUND_HALF_UP：5 永遠進位）
                 # sums 是 Decimal 累加，直接除 cnt 仍是 Decimal，無浮點誤差
                 avg = b["sums"][i] / Decimal(b["cnts"][i])
-                q = avg.quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)
+                decimals = 3 if i < len(channel_sources) and channel_sources[i] == "V" else 1
+                quantum = Decimal("0.001") if decimals == 3 else Decimal("0.1")
+                q = avg.quantize(quantum, rounding=ROUND_HALF_UP)
                 row.append(str(q))
             else:
                 row.append("")
