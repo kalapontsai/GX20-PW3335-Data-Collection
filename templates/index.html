@@ -20,6 +20,7 @@
       {% for s in stations %}<option value="{{ s }}">{{ s }}</option>{% endfor %}
     </select>
   </label>
+  <a href="/dashboard" class="btn" id="dashboardBtn" target="_blank" title="6 工位即時儀表板（新分頁）">儀表板</a>
   <a href="/settings" class="btn" id="settingsBtn">設定</a>
   <button id="exportCsvBtn" class="btn" title="將當前工位記錄儲存為 CSV">儲存 CSV</button>
   <button id="clearBtn" class="btn btn-danger" title="清除當前工位的歷史（可選擇是否歸檔）">清除此工位</button>

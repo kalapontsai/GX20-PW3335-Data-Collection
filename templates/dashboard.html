@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
+<title>GX20-PW3335 即時儀表板</title>
+<style>
+  /* v12.0 r2：/dashboard
+     設計目標：
+       1. RWD — auto-fit minmax grid，手機 1 欄、平板 2、桌機/TV 3+。
+       2. 字體依螢幕比例放大 — 全部以 rem 為單位，
+          html { font-size: clamp(14px, 2.4vmin, 24px); } 為基準，
+          vmin 自動取短邊，手機直橫向都不失真。
+       3. 表格數字 tabular-nums，跳動不抖。
+       4. 與 mobile.html 同調色板（淺底 + 表格灰線）。
+  */
+  :root {
+    --bg:        #f5f7fb;
+    --card:      #ffffff;
+    --fg:        #1a1a1a;
+    --muted:     #6b7280;
+    --line:      #e5e7eb;
+    --header:    #f8fafc;
+    --accent:    #2563eb;
+    --tc:        #2563eb;
+    --v:         #d97706;
+    --ok:        #16a34a;
+    --bad:       #dc2626;
+    --neg:       #0969da;
+  }
+  *, *::before, *::after { box-sizing: border-box; }
+  html {
+    /* 整體縮放基準：14–24px，依螢幕短邊比例 */
+    font-size: clamp(14px, 2.4vmin, 24px);
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    margin: 0; padding: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: -apple-system, "PingFang TC", "Noto Sans TC", "Microsoft JhengHei", "Segoe UI", sans-serif;
+    line-height: 1.45;
+  }
+
+  /* ---- Top bar ---- */
+  header.top {
+    padding: 0.7rem 1rem;
+    background: var(--header);
+    border-bottom: 1px solid var(--line);
+    display: flex; align-items: baseline; justify-content: space-between;
+    gap: 0.8rem; flex-wrap: wrap;
+  }
+  header.top h1 {
+    margin: 0;
+    font-size: clamp(1.2rem, 3vmin, 1.9rem);
+    font-weight: 600;
+    letter-spacing: 0.02em;
+  }
+  header.top .right {
+    display: flex; align-items: center; gap: 0.8rem; flex-wrap: wrap;
+    font-size: 0.85rem;
+    color: var(--muted);
+  }
+  header.top .right .pill {
+    padding: 0.2rem 0.6rem;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--card);
+    font-variant-numeric: tabular-nums;
+  }
+  header.top .right button {
+    padding: 0.25rem 0.7rem;
+    border: 1px solid var(--line);
+    border-radius: 0.4rem;
+    background: var(--card);
+    color: var(--fg);
+    font: inherit;
+    cursor: pointer;
+  }
+  header.top .right button:hover { background: var(--header); }
+
+  /* ---- Grid ---- */
+  main {
+    padding: 0.7rem;
+    display: grid;
+    /* RWD：卡片寬度 18rem~28rem，自動塞滿；窄螢幕自動 1 欄 */
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr));
+    gap: 0.7rem;
+  }
+  @media (min-width: 1400px) {
+    main { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  }
+
+  /* ---- Card ---- */
+  .card {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 0.6rem;
+    padding: 0.7rem 0.8rem 0.6rem;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+    display: flex; flex-direction: column;
+    min-width: 0;
+  }
+  .card-head {
+    display: flex; align-items: flex-start; justify-content: space-between;
+    gap: 0.6rem; flex-wrap: wrap;
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 0.5rem;
+    margin-bottom: 0.5rem;
+  }
+  .card-title {
+    font-size: 1.15rem;
+    font-weight: 700;
+    color: var(--accent);
+    line-height: 1.2;
+  }
+  .card-note {
+    font-size: 0.85rem;
+    color: var(--muted);
+    margin-top: 0.2rem;
+    font-style: italic;
+    word-break: break-word;
+    max-width: 100%;
+  }
+  .card-note.empty { font-style: italic; opacity: 0.6; }
+  .conn {
+    display: inline-flex; align-items: center; gap: 0.35rem;
+    font-size: 0.78rem;
+    color: var(--muted);
+    white-space: nowrap;
+    line-height: 1.2;
+  }
+  .dot {
+    width: 0.55em; height: 0.55em;
+    border-radius: 50%;
+    background: #999;
+    flex: none;
+  }
+  .dot.on  { background: var(--ok); }
+  .dot.off { background: var(--bad); }
+  .conn .num { font-variant-numeric: tabular-nums; }
+
+  /* ---- Table ---- */
+  table.ch {
+    width: 100%;
+    border-collapse: collapse;
+    font-variant-numeric: tabular-nums;
+    font-size: 0.88rem;
+  }
+  table.ch th, table.ch td {
+    padding: 0.32rem 0.4rem;
+    border-bottom: 1px solid var(--line);
+    text-align: right;
+  }
+  table.ch thead th {
+    background: var(--header);
+    font-weight: 600;
+    color: #374151;
+    font-size: 0.82rem;
+    position: sticky; top: 0;
+  }
+  table.ch td.alias {
+    text-align: left;
+    font-weight: 500;
+  }
+  table.ch td.alias .code {
+    display: block;
+    color: var(--muted);
+    font-size: 0.72rem;
+    font-weight: 400;
+    margin-top: 0.05rem;
+  }
+  table.ch td.source-tc { color: var(--tc); font-weight: 500; }
+  table.ch td.source-v  { color: var(--v);  font-weight: 500; }
+  table.ch td.val { font-weight: 500; }
+  table.ch td.val.none { color: var(--muted); font-weight: 400; }
+  table.ch td.val.neg  { color: var(--neg); font-weight: 600; }
+  table.ch tbody tr:hover { background: rgba(0,0,0,0.025); }
+
+  .empty-row td {
+    text-align: center;
+    color: var(--muted);
+    font-style: italic;
+    padding: 0.7rem 0.4rem;
+  }
+
+  /* ---- Footer ---- */
+  footer {
+    padding: 0.5rem 1rem 0.8rem;
+    font-size: 0.75rem;
+    color: var(--muted);
+    text-align: center;
+  }
+  footer .err { color: var(--bad); }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <h1>GX20-PW3335 即時儀表板</h1>
+  <div class="right">
+    <span class="pill" id="lastUpdate">—</span>
+    <span class="pill" id="pollInfo">每 10s 自動刷新</span>
+    <button type="button" id="refreshBtn">立即刷新</button>
+  </div>
+</header>
+
+<main>
+  {% for st in stations %}
+  <section class="card" data-station="{{ st }}" aria-label="{{ st }} 儀表板">
+    <div class="card-head">
+      <div style="min-width:0; flex:1;">
+        <div class="card-title">{{ st }}</div>
+        <div class="card-note empty" data-field="note">（無備註）</div>
+      </div>
+      <span class="conn" title="PW3335 連線狀態">
+        <span class="dot" data-field="pw_dot"></span>
+        <span data-field="pw_text">—</span>
+      </span>
+    </div>
+    <table class="ch" aria-label="{{ st }} 啟用 channel">
+      <thead>
+        <tr>
+          <th style="text-align:left">channel</th>
+          <th>src</th>
+          <th>即時</th>
+          <th>平均</th>
+        </tr>
+      </thead>
+      <tbody data-field="chrows">
+        <tr class="empty-row"><td colspan="4">載入中…</td></tr>
+      </tbody>
+    </table>
+  </section>
+  {% endfor %}
+</main>
+
+<footer>
+  <span>顯示「即時 = 最新一筆 / 平均 = 視窗內算術平均」</span>
+  <span>　·　</span>
+  <span>視窗依設定 avg_window_min（目前 <span id="avgWin">—</span> 分鐘）</span>
+  <span>　·　</span>
+  <span id="errInfo"></span>
+</footer>
+
+<script>
+(function(){
+  "use strict";
+
+  const POLL_MS = 10000;
+  const DEC = { TC: 1, V: 3 };   // 即時 / 平均渲染小數位（與主畫/storage 一致）
+
+  const $ = (root, sel) => root.querySelector(sel);
+  const $$ = (root, sel) => Array.from(root.querySelectorAll(sel));
+
+  function fmt(v, src){
+    if (v === null || v === undefined || !isFinite(v)) return { text: "—", none: true };
+    const dec = DEC[src] ?? 1;
+    return { text: (+v).toFixed(dec), none: false };
+  }
+  function escapeHTML(s){
+    return String(s ?? "").replace(/[&<>"']/g, m => (
+      { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[m]
+    ));
+  }
+
+  function renderCard(card, data){
+    if (!data) return;
+    // ---- 備註 ----
+    const noteEl = $('[data-field="note"]', card);
+    if (data.note && data.note.trim()) {
+      noteEl.textContent = data.note;
+      noteEl.classList.remove("empty");
+    } else {
+      noteEl.textContent = "（無備註）";
+      noteEl.classList.add("empty");
+    }
+    // ---- PW3335 ----
+    const dot  = $('[data-field="pw_dot"]', card);
+    const txt  = $('[data-field="pw_text"]', card);
+    if (data.pw_connected) {
+      dot.classList.remove("off"); dot.classList.add("on");
+      const v = data.last_vip?.v, i = data.last_vip?.i, w = data.last_vip?.w;
+      const fmtV = (x) => (x == null || !isFinite(x)) ? "—" : (+x).toFixed(2);
+      txt.textContent = `PW ${fmtV(v)} / ${fmtV(i)} / ${fmtV(w)}`;
+    } else {
+      dot.classList.remove("on"); dot.classList.add("off");
+      txt.textContent = data.pw_host ? `PW 未連線 (${data.pw_host})` : "PW 未啟用";
+    }
+
+    // ---- channel 表格 ----
+    const tbody = $('[data-field="chrows"]', card);
+    if (!data.channels.length) {
+      tbody.innerHTML = '<tr class="empty-row"><td colspan="4">（未啟用任何 channel）</td></tr>';
+      return;
+    }
+    const rows = data.channels.map(c => {
+      const r = fmt(c.realtime, c.source);
+      const a = fmt(c.avg,      c.source);
+      const rcls = r.none ? "val none" : (c.source === "TC" && c.realtime < 0 ? "val neg" : "val");
+      const acls = a.none ? "val none" : "val";
+      const scls = c.source === "V" ? "source-v" : "source-tc";
+      return `<tr>
+        <td class="alias">${escapeHTML(c.alias)}<span class="code">${escapeHTML(c.code)}</span></td>
+        <td class="${scls}">${escapeHTML(c.source)}</td>
+        <td class="${rcls}">${r.text}</td>
+        <td class="${acls}">${a.text}</td>
+      </tr>`;
+    });
+    tbody.innerHTML = rows.join("");
+  }
+
+  async function poll(){
+    const errInfo = $("#errInfo");
+    errInfo.textContent = "";
+    try {
+      const res = await fetch("/api/dashboard", { cache: "no-store" });
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      const j = await res.json();
+      if (!j.ok) throw new Error(j.error || "api ok=false");
+      $$("section.card[data-station]").forEach(card => {
+        const st = card.dataset.station;
+        renderCard(card, j.stations && j.stations[st]);
+      });
+      const m = String(j.ts || "").match(/T(\d{2}:\d{2}:\d{2})/);
+      $("#lastUpdate").textContent = "更新 " + (m ? m[1] : (j.ts || "—"));
+      $("#avgWin").textContent = j.avg_window_min ?? "—";
+    } catch(e){
+      errInfo.textContent = "更新失敗：" + e.message;
+      errInfo.classList.add("err");
+    }
+  }
+
+  // 啟動 + 每 10s 刷新
+  poll();
+  setInterval(poll, POLL_MS);
+  $("#refreshBtn").addEventListener("click", poll);
+})();
+</script>
+</body>
+</html>

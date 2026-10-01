@@ -931,6 +931,32 @@ def mobile_page():
 #
 # 對齊頁面：見 templates/calculator.html + static/js/calculator.js
 # 不需要 IP 白名單（純前端）、不需要 OTA token。
+# v12.0 r2：/dashboard 即時儀表板
+#
+# 設計：
+#   - 6 工位同頁顯示（無切換列）。
+#   - 卡片 grid，CSS auto-fit minmax → RWD（手機 1 欄、平板 2、桌機 3）。
+#   - 字體大小用 clamp(px, vmin, px) 依螢幕短邊比例放大。
+#   - 自動每 10s fetch /api/dashboard 刷新「即時 / 平均」數字。
+#   - 只列 ch_visibility=True 的接點（與主畫面圖例一致）。
+#
+# 資料來源：
+#   - 備註欄：settings.notes[station]
+#   - PW3335 連線：state["pw_connected"] / state["pw_last_vip"]
+#   - 即時：storage.query_latest(station)["t{:02d}"]
+#   - 平均：storage.query_recent(station, avg_window_min) → Python 內聚合
+#           （避免 6 工位 × 20 接點各打一次 DB）
+#
+# 純讀，不寫 — 不需 IP 白名單鎖。
+@app.route("/dashboard")
+def dashboard_page():
+    return render_template(
+        "dashboard.html",
+        stations=STATIONS,
+        points_per_station=POINTS_PER_STATION,
+    )
+
+
 @app.route("/calculator")
 def calculator_page():
     return render_template(
@@ -1067,6 +1093,117 @@ def api_latest(station: str):
         "pw":      pw_payload,
     }
     return jsonify({"ok": True, "payload": payload, "row": r})
+
+
+# v12.0 r2：/api/dashboard 給 /dashboard 頁面 fetch。
+#
+# 回傳結構：
+#   {
+#     "ok": True,
+#     "ts": "<ISO 上次更新>",
+#     "stations": {
+#       "工位1": {
+#         "note": "...",
+#         "pw_connected": bool,
+#         "last_vip": {"v": float|None, "i": ..., "w": ...},
+#         "channels": [
+#           {"x": int, "code": "0001", "alias": "Ch01", "source": "TC"|"V",
+#            "realtime": float|None, "avg": float|None},
+#           ...
+#         ]
+#       },
+#       ...
+#     }
+#   }
+#
+# 「啟用」定義 = settings.ch_visibility[st][i] == True（與圖表圖例同源）。
+# avg 用「一站一次 query_recent + Python 內聚合」批次算，6 站 × 20 接點
+# 只打 6 次 DB；每 10s 一次輪詢完全可接受。
+@app.route("/api/dashboard")
+def api_dashboard():
+    s = load_settings()
+    avg_window = int(s.get("avg_window_min", config.DEFAULT_AVG_WINDOW_MIN))
+
+    vis_all    = s.get("ch_visibility", {}) or {}
+    alias_all  = s.get("ch_alias", {}) or {}
+    source_all = s.get("ch_source", {}) or {}
+    notes_all  = s.get("notes", {}) or {}
+
+    # v7：電力連線狀態 — 與 /api/pw_connection 同源
+    pw_hosts_all = (s.get("pw3335") or {}).get("hosts", {}) or {}
+
+    out: Dict[str, Any] = {}
+    with state["lock"]:
+        pw_conn_snapshot   = dict(state["pw_connected"])
+        pw_vip_snapshot    = dict(state["pw_last_vip"])
+        pw_err_snapshot    = dict(state["pw_last_error"])
+
+    for st in STATIONS:
+        vis    = vis_all.get(st)    or [True] * POINTS_PER_STATION
+        alias  = alias_all.get(st)  or [f"Ch{i+1:02d}" for i in range(POINTS_PER_STATION)]
+        source = source_all.get(st) or ["TC"] * POINTS_PER_STATION
+        note   = notes_all.get(st)  or ""
+
+        # 一次拉最近 avg_window 分鐘的 samples，Python 內算 20 接點平均
+        try:
+            recent = storage.query_recent(st, avg_window) if avg_window > 0 else storage.query_recent(st, 60 * 24 * 365)
+        except Exception:
+            recent = []
+
+        # 預先 index 起來省 list 線性搜
+        sums: Dict[int, float]   = {}
+        counts: Dict[int, int]   = {}
+        for row in recent:
+            for idx in range(POINTS_PER_STATION):
+                col = f"t{idx+1:02d}"
+                v = row.get(col)
+                if v is None:
+                    continue
+                sums[idx]   = sums.get(idx, 0.0) + float(v)
+                counts[idx] = counts.get(idx, 0) + 1
+
+        latest = storage.query_latest(st)
+        vip = pw_vip_snapshot.get(st, (None, None, None))
+
+        channels: List[Dict[str, Any]] = []
+        for idx in range(POINTS_PER_STATION):
+            if idx >= len(vis) or not vis[idx]:
+                continue
+            ch_code = CHANNEL_NUMBER[st][idx]
+            ch_alias = alias[idx] if idx < len(alias) else ch_code
+            ch_src   = source[idx] if idx < len(source) else "TC"
+
+            realtime = latest.get(f"t{idx+1:02d}") if latest else None
+
+            avg_val: Optional[float] = None
+            n = counts.get(idx, 0)
+            if n > 0:
+                avg_val = round(sums[idx] / n, 2)
+
+            channels.append({
+                "x":        idx,
+                "code":     ch_code,
+                "alias":    ch_alias,
+                "source":   ch_src,
+                "realtime": realtime,
+                "avg":      avg_val,
+            })
+
+        out[st] = {
+            "note":         note,
+            "pw_host":     pw_hosts_all.get(st, ""),
+            "pw_connected": bool(pw_conn_snapshot.get(st, False)),
+            "pw_error":    pw_err_snapshot.get(st),
+            "last_vip":    {"v": vip[0], "i": vip[1], "w": vip[2]},
+            "channels":    channels,
+        }
+
+    return jsonify({
+        "ok": True,
+        "ts": datetime.now().isoformat(timespec="seconds"),
+        "avg_window_min": avg_window,
+        "stations": out,
+    })
 
 
 @app.route("/api/connection")
