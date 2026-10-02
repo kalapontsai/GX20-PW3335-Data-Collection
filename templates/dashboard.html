@@ -103,6 +103,9 @@
     box-shadow: 0 1px 2px rgba(0,0,0,0.04);
     display: flex; flex-direction: column;
     min-width: 0;
+    /* v12.0 r3：固定高度，約可裝 5 channel；超出的用 v-scroll */
+    height: 18rem;
+    overflow: hidden;
   }
   .card-head {
     display: flex; align-items: flex-start; justify-content: space-between;
@@ -110,7 +113,20 @@
     border-bottom: 1px solid var(--line);
     padding-bottom: 0.5rem;
     margin-bottom: 0.5rem;
+    flex-shrink: 0;   /* head 不被 flex 壓縮 */
   }
+  /* v12.0 r3：channel 表 scroll 容器；thead 留在視窗頂 */
+  .card-scroll {
+    flex: 1 1 auto;
+    min-height: 0;       /* 關鍵：flex 子項 overflow 才會生效 */
+    overflow-y: auto;
+    overflow-x: hidden;
+  }
+  .card-scroll::-webkit-scrollbar { width: 8px; }
+  .card-scroll::-webkit-scrollbar-thumb {
+    background: #cbd5e1; border-radius: 4px;
+  }
+  .card-scroll::-webkit-scrollbar-track { background: transparent; }
   .card-title {
     font-size: 1.15rem;
     font-weight: 700;
@@ -221,19 +237,21 @@
         <span data-field="pw_text">—</span>
       </span>
     </div>
-    <table class="ch" aria-label="{{ st }} 啟用 channel">
-      <thead>
-        <tr>
-          <th style="text-align:left">channel</th>
-          <th>src</th>
-          <th>即時</th>
-          <th>平均</th>
-        </tr>
-      </thead>
-      <tbody data-field="chrows">
-        <tr class="empty-row"><td colspan="4">載入中…</td></tr>
-      </tbody>
-    </table>
+    <div class="card-scroll">
+      <table class="ch" aria-label="{{ st }} 啟用 channel">
+        <thead>
+          <tr>
+            <th style="text-align:left">channel</th>
+            <th>src</th>
+            <th>即時</th>
+            <th>平均</th>
+          </tr>
+        </thead>
+        <tbody data-field="chrows">
+          <tr class="empty-row"><td colspan="4">載入中…</td></tr>
+        </tbody>
+      </table>
+    </div>
   </section>
   {% endfor %}
 </main>
@@ -253,8 +271,8 @@
   const POLL_MS = 10000;
   const DEC = { TC: 1, V: 3 };   // 即時 / 平均渲染小數位（與主畫/storage 一致）
 
-  const $ = (root, sel) => root.querySelector(sel);
-  const $$ = (root, sel) => Array.from(root.querySelectorAll(sel));
+  const $ = (sel, root=document) => root.querySelector(sel);
+  const $$ = (sel, root=document) => Array.from(root.querySelectorAll(sel));
 
   function fmt(v, src){
     if (v === null || v === undefined || !isFinite(v)) return { text: "—", none: true };
