@@ -109,8 +109,9 @@ a { color: var(--primary); }
   border: 1px solid var(--border);
   border-radius: 4px;
   font: inherit;
-  width: 250px;          /* 視覺上給的寬度；輸入限制 20 字由 maxlength 控 */
-  margin-left: auto;     /* 推到右側，跟 .conn 群組自然相鄰 */
+  /* v12.0 r7：往左貼齊、填滿 themeBtn 與 connText 之間空間 */
+  flex: 1 1 auto;
+  min-width: 8rem;       /* 窄螢幕下限，避免被壓到看不見 */
 }
 .note-box::placeholder { color: var(--text-dim); }
 
