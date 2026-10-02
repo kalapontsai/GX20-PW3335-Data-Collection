@@ -95,6 +95,8 @@
   }
 
   /* ---- Card ---- */
+  /* v12.0 r8：第 2/4/6 張卡（工位2/4/6）背景淡灰 #E6E6E6，與 1/3/5 區別 */
+  .card.alt-row { background: #E6E6E6; }
   .card {
     background: var(--card);
     border: 1px solid var(--line);
@@ -241,7 +243,7 @@
 
 <main>
   {% for st in stations %}
-  <section class="card" data-station="{{ st }}" aria-label="{{ st }} 儀表板">
+  <section class="card{% if loop.index is even %} alt-row{% endif %}" data-station="{{ st }}" aria-label="{{ st }} 儀表板">
     <div class="card-head">
       <div style="min-width:0; flex:1;">
         <div class="card-title">{{ st }}</div>
