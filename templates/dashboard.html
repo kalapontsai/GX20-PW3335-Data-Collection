@@ -132,7 +132,9 @@
     font-weight: 700;
     color: var(--accent);
     line-height: 1.2;
+    text-decoration: none;       /* v12.0 r5：作為連結不顯示底線 */
   }
+  a.card-title:hover { text-decoration: underline; }
   .card-note {
     font-size: 0.85rem;
     color: var(--muted);
@@ -230,7 +232,7 @@
   <section class="card" data-station="{{ st }}" aria-label="{{ st }} 儀表板">
     <div class="card-head">
       <div style="min-width:0; flex:1;">
-        <div class="card-title">{{ st }}</div>
+        <a class="card-title" href="/" target="_blank" rel="noopener" title="在新分頁開啟主頁面">{{ st }}</a>
         <div class="card-note empty" data-field="note">（無備註）</div>
       </div>
       <span class="conn" title="PW3335 連線狀態">
