@@ -132,9 +132,21 @@
     font-weight: 700;
     color: var(--accent);
     line-height: 1.2;
-    text-decoration: none;       /* v12.0 r5：作為連結不顯示底線 */
   }
-  a.card-title:hover { text-decoration: underline; }
+  /* v12.0 r6：標題旁 [切換圖表] 連結樣式（原視窗 → /） */
+  h1 .title-side-link {
+    font-size: 0.55em;
+    font-weight: 400;
+    color: var(--accent);
+    text-decoration: none;
+    padding: 0.15rem 0.6rem;
+    margin-left: 0.4rem;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--card);
+    vertical-align: middle;
+  }
+  h1 .title-side-link:hover { background: var(--header); }
   .card-note {
     font-size: 0.85rem;
     color: var(--muted);
@@ -219,7 +231,7 @@
 <body>
 
 <header class="top">
-  <h1>GX20-PW3335 即時儀表板</h1>
+  <h1>GX20-PW3335 即時儀表板 <a href="/" class="title-side-link" title="原視窗切換到主頁圖表">切換圖表</a></h1>
   <div class="right">
     <span class="pill" id="lastUpdate">—</span>
     <span class="pill" id="pollInfo">每 10s 自動刷新</span>
@@ -232,7 +244,7 @@
   <section class="card" data-station="{{ st }}" aria-label="{{ st }} 儀表板">
     <div class="card-head">
       <div style="min-width:0; flex:1;">
-        <a class="card-title" href="/" target="_blank" rel="noopener" title="在新分頁開啟主頁面">{{ st }}</a>
+        <div class="card-title">{{ st }}</div>
         <div class="card-note empty" data-field="note">（無備註）</div>
       </div>
       <span class="conn" title="PW3335 連線狀態">
