@@ -164,10 +164,11 @@
     width: 100%;
     border-collapse: collapse;
     font-variant-numeric: tabular-nums;
-    font-size: 0.88rem;
+    font-size: 1.05rem;          /* v12.0 r4 加大，填滿卡片 */
+    line-height: 1.4;
   }
   table.ch th, table.ch td {
-    padding: 0.32rem 0.4rem;
+    padding: 0.55rem 0.6rem;     /* v12.0 r4 加大 */
     border-bottom: 1px solid var(--line);
     text-align: right;
   }
@@ -175,25 +176,25 @@
     background: var(--header);
     font-weight: 600;
     color: #374151;
-    font-size: 0.82rem;
+    font-size: 0.95rem;          /* v12.0 r4 加大 */
     position: sticky; top: 0;
   }
   table.ch td.alias {
     text-align: left;
-    font-weight: 500;
+    font-weight: 600;
+    font-size: 1.1rem;           /* v12.0 r4 加大 */
   }
   table.ch td.alias .code {
     display: block;
     color: var(--muted);
-    font-size: 0.72rem;
+    font-size: 0.78rem;          /* v12.0 r4 微調 */
     font-weight: 400;
-    margin-top: 0.05rem;
+    margin-top: 0.1rem;
   }
-  table.ch td.source-tc { color: var(--tc); font-weight: 500; }
-  table.ch td.source-v  { color: var(--v);  font-weight: 500; }
-  table.ch td.val { font-weight: 500; }
+  /* v12.0 r4：src 欄移除，下面兩條 source 樣式刪除 */
+  table.ch td.val { font-weight: 600; font-size: 1.15rem; }   /* 即時/平均數字加大 */
   table.ch td.val.none { color: var(--muted); font-weight: 400; }
-  table.ch td.val.neg  { color: var(--neg); font-weight: 600; }
+  table.ch td.val.neg  { color: var(--neg); font-weight: 700; font-size: 1.2rem; }
   table.ch tbody tr:hover { background: rgba(0,0,0,0.025); }
 
   .empty-row td {
@@ -242,13 +243,12 @@
         <thead>
           <tr>
             <th style="text-align:left">channel</th>
-            <th>src</th>
             <th>即時</th>
             <th>平均</th>
           </tr>
         </thead>
         <tbody data-field="chrows">
-          <tr class="empty-row"><td colspan="4">載入中…</td></tr>
+          <tr class="empty-row"><td colspan="3">載入中…</td></tr>
         </tbody>
       </table>
     </div>
@@ -312,7 +312,7 @@
     // ---- channel 表格 ----
     const tbody = $('[data-field="chrows"]', card);
     if (!data.channels.length) {
-      tbody.innerHTML = '<tr class="empty-row"><td colspan="4">（未啟用任何 channel）</td></tr>';
+      tbody.innerHTML = '<tr class="empty-row"><td colspan="3">（未啟用任何 channel）</td></tr>';
       return;
     }
     const rows = data.channels.map(c => {
@@ -320,10 +320,8 @@
       const a = fmt(c.avg,      c.source);
       const rcls = r.none ? "val none" : (c.source === "TC" && c.realtime < 0 ? "val neg" : "val");
       const acls = a.none ? "val none" : "val";
-      const scls = c.source === "V" ? "source-v" : "source-tc";
       return `<tr>
         <td class="alias">${escapeHTML(c.alias)}<span class="code">${escapeHTML(c.code)}</span></td>
-        <td class="${scls}">${escapeHTML(c.source)}</td>
         <td class="${rcls}">${r.text}</td>
         <td class="${acls}">${a.text}</td>
       </tr>`;
