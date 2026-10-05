@@ -1,6 +1,6 @@
 # GX20 Web Monitor — 版本演進與現況
 
-> 大版本快照 + 重要 bug 修復 + 現況進度（最後更新：2026-09-18）
+> 大版本快照 + 重要 bug 修復 + 現況進度（最後更新：2026-10-05）
 >
 > 程式架構見 [ARCHITECTURE.md](ARCHITECTURE.md)；使用者操作見 [README.md](README.md)。
 
@@ -20,6 +20,7 @@
 10. [現況進度（2026-07-22 snapshot viewer v10）](#10-現況進度2026-07-22-snapshot-viewer-v10)
 11. [現況進度（2026-07-23 備註同步 + archive meta v10.1）](#11-現況進度2026-07-23-備註同步--archive-meta-v101)
 12. [現況進度（2026-09-18 工位5 t20 轉 5V）](#12-現況進度2026-09-18-工位5-t20-轉-5v)
+13. [現況進度（2026-10-05 備註 30→255 + OTA uptime 首呼修正）](#13-現況進度2026-10-05-備註-30255--ota-uptime-首呼修正)
 
 ---
 
@@ -43,6 +44,8 @@
 | **v8.2** | 2026-06-16 | 溫度與電力 X 軸寬度對齊（afterFit hook） |
 | **v12.0** | 2026-09-18 | 工位 5 `t20` 改讀 GX20 `0610` 5V 電壓，修正實機回應解析 |
 | **v12.0 r1** | 2026-09-18 | 設定頁 UI 完成：頻道卡片「顯示」checkbox 旁新增 Volt 開關；切到 V 顯示 3 位小數 |
+| **v12.0 r9** | 2026-10-05 | 備註欄上限 30 → 255 字（HTML / JS / 後端 load+save / 歸檔 meta / 註解 5 個層級全部一致）|
+| **v12.0 r10** | 2026-10-05 | `ota.py` `uptime_seconds` 改用 module-level `_BOOT_TIME`，process 重啟後首呼正確顯示啟動以來的時間（修前必回 0.0）|
 
 ## 12. 現況進度（2026-09-18 工位5 t20 轉 5V）
 
@@ -58,6 +61,82 @@
 
 - `test_gx20_reader_smoke.py`：5 個測試全部通過。
 - `v10.4 fix`、`v10.3.2 whitelist`、`v10.2 PW3335`、`snapshot` 既有測試 v12.0 後仍全 PASS。
+
+---
+
+## 13. 現況進度（2026-10-05 備註 30→255 + OTA uptime 首呼修正）
+
+### 變更內容
+
+#### v12.0 r9 — 備註欄上限 30 → 255 字
+
+備註欄 (`#noteBox`) 在 5 個層級同時被 30 字限制住，個別上游改：
+
+| 檔案 | 行 | 變更 |
+|---|---|---|
+| `templates/index.html` | 28 | `maxlength="30"` → `255`，`title` 同步（255字） |
+| `static/js/main.js` | 96, 239 | `slice(0, 30)` → `slice(0, 255)`（`oninput` 即時寫 + `saveNoteForStation` 切工位時 save） |
+| `app.py` | 296, 304 | 註解「上限 20 字」→「255 字」、「`v[:30]`」→「`v[:255]`」(`load_settings`) |
+| `app.py` | 478 | 「`val[:30]`」→「`val[:255]`」(`save_settings`) |
+| `config.py` | 168 | 註解 對齊 |
+| `storage.py` | 368 | 截斷 對齊（archive dump） |
+
+註解原本寫「上限 20 字」其實跟程式碼的 `[:30]` 對不上（stale），順手一起對齊 255。
+deployment URL 維持 `http://10.35.31.10:5000`（不動）。
+
+#### v12.0 r10 — OTA `/api/admin/status` 的 `uptime_seconds` 首呼修正
+
+**症狀**：process 重啟後，第一個呼叫 `/api/admin/status` 回的 `uptime_seconds` 永遠是 `0.0`，看起來像 uptime 計算壞了。實際上第二次以後就正常遞增（2003 → 2006 → 2009…）。
+
+**根因**：`ota.py` 原本用「第一次呼叫 `status()` 時把 `_boot_time` 寫在 function object 上」的模式：
+
+```python
+def status() -> dict:
+    boot = getattr(status, "_boot_time", None)
+    if boot is None:
+        boot = _t.time()
+        status._boot_time = boot
+    ...
+    "uptime_seconds": round(_t.time() - boot, 1),
+```
+
+這意思是 `_boot_time` 是「**自從首次呼叫 status() 起的時間**」，不是「**process 啟動起的時間**」。所以 process 重啟後第一次呼叫 `status()` 必然會回 `0.0`。
+
+**修法**：把 `_boot_time` 移到 module 層級常數，在 module 載入時凍結一次：
+
+```python
+_BOOT_TIME = time.time()   # module 載入時 = process 啟動期
+
+def status() -> dict:
+    ...
+    "uptime_seconds": round(time.time() - _BOOT_TIME, 1),
+```
+
+process 重啟後首呼就能正確顯示「自 process 啟動以來的真實時間」。
+
+### 驗證結果
+
+- **r9**：
+    - 本地 commit `d967b9a` 已 OTA 部署至 `http://10.35.31.10:5000`（備份：`config\ota_backup\20261005_105038\`）
+    - 部署後 `curl http://10.35.31.10:5000/` 確認 `<input id="noteBox" maxlength="255" title="備註欄（255字…）">` 已生效
+- **r10**：
+    - 本機測試：`import ota; time.sleep(3); status()` → `uptime_seconds: 3.0`；`+2s` 後 → `5.0` ✓
+    - Commit `6c52150` OTA 部署後重啟驗證（process 啟動 ~8s 後首呼）：
+
+| 量測點 | uptime | 對照 |
+|---|---|---|
+| 重啟後首呼（修前必為 0）| **8.2s** | ✓ 修好 |
+| +3s 後 | 11.3s | ✓ 與 sleep 一致 |
+| 再 +3s 後 | 14.4s | ✓ 與 sleep 一致 |
+
+    - 備份：`config\ota_backup\20261005_112700\ota.py`
+
+### 部署記錄
+
+- **OTA host**：`http://10.35.31.10:5000`
+- **OTA token**：存放於開發端 `config/ota_token`（檔案 0600，部署時同步過）
+- **Token 指紋**：`750f9385`（SHA-256 前 8 碼）
+- **Watch dog**：`ota_watchdog.bat`（崩潰或 OTA restart 自動再起）
 - JS 語法檢查（`node --check`）：`main.js` / `settings.js` / `storage.js` 全部通過。
 - 實機 GX20 連線成功，2026-09-18 實際讀值為 `0610 = 3.7V`。
 - 工位 5 其他有效溫度：`0501 = 29.6°C`、`0502 = 30.0°C`、`0503 = 7.4°C`、`0504 = 30.2°C`、`0505 = 30.2°C`。
