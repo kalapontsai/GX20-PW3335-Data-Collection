@@ -277,14 +277,15 @@ def schedule_restart(delay_sec: int = 2) -> dict:
 # 工具
 # ============================================================
 
+# Process 啟動時間（module 載入時凍結一次）。
+# 原本用「第一次呼叫 status() 時才設」會導致 process 重啟後的首呼回 0，
+# 看起來像 uptime 沒在動；改成 module-level 常數後反映「自 process 啟動起的真實時間」。
+_BOOT_TIME = time.time()
+
+
 def status() -> dict:
     """回傳 OTA 模組狀態（給 /api/admin/status 用）。"""
     token = get_token()
-    import time as _t
-    boot = getattr(status, "_boot_time", None)
-    if boot is None:
-        boot = _t.time()
-        status._boot_time = boot
     return {
         "ok": True,
         "ota_version": 2,
@@ -297,7 +298,7 @@ def status() -> dict:
         "app_root": APP_ROOT,
         "backup_dir": OTA_BACKUP_DIR,
         "allowed_targets_count": len(ALLOWED_TARGETS),
-        "uptime_seconds": round(_t.time() - boot, 1),
+        "uptime_seconds": round(time.time() - _BOOT_TIME, 1),
     }
 
 
