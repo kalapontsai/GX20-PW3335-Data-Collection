@@ -7,6 +7,18 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <title>GX20-PW3335 即時儀表板</title>
+<script>
+  // v12.0 r9：避免 FOUC，先讀 localStorage 決定 data-theme
+  (function(){
+    try {
+      var t = localStorage.getItem("gx20.dashboard.theme");
+      if (t !== "light" && t !== "dark") {
+        t = (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) ? "dark" : "light";
+      }
+      document.documentElement.dataset.theme = t;
+    } catch(e) {}
+  })();
+</script>
 <style>
   /* v12.0 r2：/dashboard
      設計目標：
@@ -30,6 +42,29 @@
     --ok:        #16a34a;
     --bad:       #dc2626;
     --neg:       #0969da;
+    --alt-row:   #E6E6E6;    /* 工位2/4/6 背景（v12.0 r8） */
+    --thead-fg:  #374151;
+    --hover:     rgba(0,0,0,0.025);
+    --scrollbar: #cbd5e1;
+  }
+  /* v12.0 r9：GitHub-Dark 暗色模式 */
+  [data-theme="dark"] {
+    --bg:        #0d1117;
+    --card:      #161b22;
+    --fg:        #e6edf3;
+    --muted:     #7d8590;
+    --line:      #30363d;
+    --header:    #1c2128;
+    --accent:    #2f81f7;
+    --tc:        #2f81f7;
+    --v:         #d29922;
+    --ok:        #3fb950;
+    --bad:       #f85149;
+    --neg:       #58a6ff;
+    --alt-row:   #21262d;
+    --thead-fg:  #c9d1d9;
+    --hover:     rgba(255,255,255,0.04);
+    --scrollbar: #484f58;
   }
   *, *::before, *::after { box-sizing: border-box; }
   html {
@@ -96,7 +131,7 @@
 
   /* ---- Card ---- */
   /* v12.0 r8：第 2/4/6 張卡（工位2/4/6）背景淡灰 #E6E6E6，與 1/3/5 區別 */
-  .card.alt-row { background: #E6E6E6; }
+  .card.alt-row { background: var(--alt-row); }
   .card {
     background: var(--card);
     border: 1px solid var(--line);
@@ -126,7 +161,7 @@
   }
   .card-scroll::-webkit-scrollbar { width: 8px; }
   .card-scroll::-webkit-scrollbar-thumb {
-    background: #cbd5e1; border-radius: 4px;
+    background: var(--scrollbar); border-radius: 4px;
   }
   .card-scroll::-webkit-scrollbar-track { background: transparent; }
   .card-title {
@@ -191,7 +226,7 @@
   table.ch thead th {
     background: var(--header);
     font-weight: 600;
-    color: #374151;
+    color: var(--thead-fg);
     font-size: 0.95rem;          /* v12.0 r4 加大 */
     position: sticky; top: 0;
   }
@@ -211,7 +246,7 @@
   table.ch td.val { font-weight: 600; font-size: 1.15rem; }   /* 即時/平均數字加大 */
   table.ch td.val.none { color: var(--muted); font-weight: 400; }
   table.ch td.val.neg  { color: var(--neg); font-weight: 700; font-size: 1.2rem; }
-  table.ch tbody tr:hover { background: rgba(0,0,0,0.025); }
+  table.ch tbody tr:hover { background: var(--hover); }
 
   .empty-row td {
     text-align: center;
@@ -230,7 +265,7 @@
   footer .err { color: var(--bad); }
 </style>
 </head>
-<body>
+<body data-theme="light">
 
 <header class="top">
   <h1>GX20-PW3335 即時儀表板 <a href="/" class="title-side-link" title="原視窗切換到主頁圖表">切換圖表</a></h1>
@@ -238,6 +273,7 @@
     <span class="pill" id="lastUpdate">—</span>
     <span class="pill" id="pollInfo">每 10s 自動刷新</span>
     <button type="button" id="refreshBtn">立即刷新</button>
+    <button type="button" id="themeBtn" title="切換明亮/暗黑">☀/🌙</button>
   </div>
 </header>
 
@@ -365,6 +401,30 @@
       errInfo.classList.add("err");
     }
   }
+
+  // ---- 主題切換（v12.0 r9）----
+  // 與主畫面 session 解耦：獨立 localStorage key，
+  // TV/monitor 視圖可單獨設定主題，不影響操作者 session。
+  const THEME_KEY = "gx20.dashboard.theme";
+  function updateThemeBtn() {
+    const btn = document.getElementById("themeBtn");
+    if (!btn) return;
+    btn.textContent = document.body.dataset.theme === "dark" ? "🌙" : "☀";
+  }
+  function syncBodyTheme() {
+    document.body.dataset.theme = document.documentElement.dataset.theme || "light";
+    updateThemeBtn();
+  }
+  function toggleTheme() {
+    const next = document.body.dataset.theme === "dark" ? "light" : "dark";
+    document.documentElement.dataset.theme = next;
+    document.body.dataset.theme = next;
+    try { localStorage.setItem(THEME_KEY, next); } catch {}
+    updateThemeBtn();
+  }
+  syncBodyTheme();
+  const themeBtnEl = document.getElementById("themeBtn");
+  if (themeBtnEl) themeBtnEl.addEventListener("click", toggleTheme);
 
   // 啟動 + 每 10s 刷新
   poll();
