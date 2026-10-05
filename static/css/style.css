@@ -23,25 +23,26 @@ body[data-theme="light"] {
   --shadow:      0 2px 6px rgba(0,0,0,0.08);
 }
 body[data-theme="dark"] {
-  --bg:          #1d2e17;
-  --surface:     #2c4521;
-  --surface-2:   #395a2b;
-  --border:      #5a7939;
-  --border-2:    #6c8a47;
-  --text:        #eaf2e0;
-  --text-dim:    #b8cfce;
-  --text-mute:   #8a9a7a;
-  --primary:     #4c6d3b;
-  --primary-h:   #5a7939;
-  --primary-fg:  #f4faee;
-  --danger:      #843c39;
-  --danger-h:    #c0392b;
-  --accent:      #ffcc44;
+  /* GitHub-Dark 色票（Primer primitives） */
+  --bg:          #0d1117;   /* canvas.default    */
+  --surface:     #161b22;   /* canvas.subtle     */
+  --surface-2:   #1c2128;   /* canvas.overlay    */
+  --border:      #30363d;   /* border.default    */
+  --border-2:    #21262d;   /* border.muted      */
+  --text:        #e6edf3;   /* fg.default        */
+  --text-dim:    #7d8590;   /* fg.muted          */
+  --text-mute:   #6e7681;   /* fg.subtle         */
+  --primary:     #2f81f7;   /* accent.fg         */
+  --primary-h:   #1f6feb;   /* accent.emphasis   */
+  --primary-fg:  #ffffff;
+  --danger:      #da3633;   /* danger.emphasis   */
+  --danger-h:    #f85149;   /* danger.fg         */
+  --accent:      #d29922;   /* attention.fg      */
   --grid:        rgba(255,255,255,0.05);
   --table-head:  var(--surface-2);
   --tab-active:  var(--primary-h);
-  --dot-on:      #5cff5c;
-  --dot-off:     #ff5050;
+  --dot-on:      #3fb950;   /* success.fg        */
+  --dot-off:     #f85149;   /* danger.fg         */
   --shadow:      0 2px 8px rgba(0,0,0,0.5);
 }
 
