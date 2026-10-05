@@ -293,15 +293,15 @@ def load_settings() -> dict:
             merged_source[st][:len(normalized)] = normalized
         out["ch_source"] = merged_source
 
-    # v10.x：備註欄（per-station 字串，上限 20 字，跟 alias 一樣跨瀏覽器同步）
+    # v10.x：備註欄（per-station 字串，上限 255 字，跟 alias 一樣跨瀏覽器同步）
     notes_raw = config.from_json(raw.get("notes"), default=defaults["notes"])
     if isinstance(notes_raw, dict):
         merged_notes = dict(defaults["notes"])
         for st in STATIONS:
             v = notes_raw.get(st)
             if isinstance(v, str):
-                # 截斷到 30 字（前端 maxlength=30 防線）
-                merged_notes[st] = v[:30]
+                # 截斷到 255 字（前端 maxlength=255 防線）
+                merged_notes[st] = v[:255]
             elif v is None:
                 merged_notes[st] = ""
         out["notes"] = merged_notes
@@ -475,7 +475,7 @@ def save_settings(patch: dict) -> None:
                 existing = config.default_settings()["notes"]
             for st, val in v.items():
                 if st in STATIONS and isinstance(val, str):
-                    existing[st] = val[:30]  # 與 load_settings 一致的截斷
+                    existing[st] = val[:255]  # 與 load_settings 一致的截斷
             storage.set_setting("notes", config.to_json(existing))
         elif k == "whitelist":
             # v10.3.x：whitelist = {cors_origins, ota_admin_ips, remote_write_ips,

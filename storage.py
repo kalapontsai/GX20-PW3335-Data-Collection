@@ -365,7 +365,7 @@ def _build_archive_meta(station: str) -> Optional[dict]:
         if isinstance(notes_obj, dict):
             v = notes_obj.get(station)
             if isinstance(v, str):
-                truncated = v[:30]
+                truncated = v[:255]
                 # v10.x：note 為空字串視為「未設定」→ meta.note=null
                 if truncated.strip() == "":
                     meta["note"] = None
