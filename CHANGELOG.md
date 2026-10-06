@@ -1,6 +1,6 @@
 # GX20 Web Monitor — 版本演進與現況
 
-> 大版本快照 + 重要 bug 修復 + 現況進度（最後更新：2026-10-05）
+> 大版本快照 + 重要 bug 修復 + 現況進度（最後更新：2026-10-06）
 >
 > 程式架構見 [ARCHITECTURE.md](ARCHITECTURE.md)；使用者操作見 [README.md](README.md)。
 
@@ -21,6 +21,7 @@
 11. [現況進度（2026-07-23 備註同步 + archive meta v10.1）](#11-現況進度2026-07-23-備註同步--archive-meta-v101)
 12. [現況進度（2026-09-18 工位5 t20 轉 5V）](#12-現況進度2026-09-18-工位5-t20-轉-5v)
 13. [現況進度（2026-10-05 備註 30→255 + OTA uptime 首呼修正）](#13-現況進度2026-10-05-備註-30255--ota-uptime-首呼修正)
+14. [現況進度（2026-10-06 calculator x-line 固定 1445 min + 抓取平均溫度 toggle）](#14-現況進度2026-10-06-calculator-x-line-固定-1445-min--抓取平均溫度-toggle)
 
 ---
 
@@ -46,6 +47,8 @@
 | **v12.0 r1** | 2026-09-18 | 設定頁 UI 完成：頻道卡片「顯示」checkbox 旁新增 Volt 開關；切到 V 顯示 3 位小數 |
 | **v12.0 r9** | 2026-10-05 | 備註欄上限 30 → 255 字（HTML / JS / 後端 load+save / 歸檔 meta / 註解 5 個層級全部一致）|
 | **v12.0 r10** | 2026-10-05 | `ota.py` `uptime_seconds` 改用 module-level `_BOOT_TIME`，process 重啟後首呼正確顯示啟動以來的時間（修前必回 0.0）|
+| **v12.0 r11** | 2026-10-06 | calculator 頁 x-line 改為固定 1445 min 窗口（拖任一條或中段 highlight 都同步平移）；index.html 不受影響 |
+| **v12.0 r12** | 2026-10-06 | calculator 頁能耗參數 - F/R 溫度 block 新增「抓取平均溫度」 checkbox；勾選→x-line 恢復左右各自移動；不勾→鎖 1445 min 固定窗口 |
 
 ## 12. 現況進度（2026-09-18 工位5 t20 轉 5V）
 
@@ -1063,3 +1066,70 @@ v10 snapshot viewer 載入 archive DB 時，圖例只能用預設 `Ch01 ~ Ch20`�
 **設計決策（避免備份膨脹）**：
 alias 全等於 `default_alias()` 時就**不寫實際值**，只標記 `null`。
 理由：歸檔頻率受「清除前歸檔」(v5) 觸發，量大時 .meta.json 寫滿 alias 會比 .db 還大。
+
+---
+
+## 14. 現況進度（2026-10-06 calculator x-line 固定 1445 min + 抓取平均溫度 toggle）
+
+### 變更內容
+
+#### v12.0 r11 — calculator 頁 x-line 改為固定 1445 min 窗口
+
+**動機**：EF 評等本質上以 24H 視窗評估，但原 `createCursorOverlay` 讓使用者自由選任意範圍，容易手動拖到非整天的窗口導致 EF 計算偏離標準 1440 min (24H) 假設。鎖成 1445 min (24H + 5min buffer) 強制對齊評等的時間口徑。
+
+**改動**：
+
+| 檔案 | 變更 |
+|---|---|
+| `static/js/chart-utils.js` | `createCursorOverlay` 新增 `opts.fixedSpanMinutes` 選項（opt-in，index.html 不傳→行為完全不變）。setPositions 內強制寬度並 clamp 到 chart 範圍；拖左 bar → 以新左邊為錨；拖右 bar → 以新右邊為錨；拖中段 highlight → 整段同步平移（中段 range 的滑鼠游標為 grab / grabbing）。資料長度 < span 時自動縮成全段範圍。 |
+| `static/js/calculator.js` | 兩處 cursor init 都帶 `fixedSpanMinutes: 1445`。CSV 載入預設 cursor 改為「右端錨在資料最後，向左抓 1445 min」（涵蓋剛好 24H + 5min 結束的窗口）。 |
+
+**沒做的事**：「尋找最佳數據」內部 `runBestWindowScan` 仍用 1440 min 掃描（演算法口徑），視覺 cursor 顯示 1445 min 會差 5 min — 若之後要完全對齊再改 `WIN` 常數。
+
+#### v12.0 r12 — calculator 頁能耗參數 - F/R 溫度 block 新增「抓取平均溫度」checkbox 切換 x-line 模式
+
+**動機**：r11 把 x-line 鎖成固定窗口後，部分使用案例（手動 debug 不同長度範圍的平均溫度）需要任意範圍拖曳。新增 checkbox 讓使用者在兩種模式間即時切換。
+
+**改動**：
+
+| 檔案 | 變更 |
+|---|---|
+| `static/js/chart-utils.js` | 新增 runtime API `cursor.setFixedSpanMinutes(min \| null)`：傳數字→切到固定模式並以現有 tsLeft 重新錨點；傳 null → 恢復預設左右各自移動。Range drag handler 改為永遠綁定（內部依 `state.fixedSpanMs` 決定是否生效），這樣 runtime 切換模式不必 rebind listeners；range 滑鼠游標（`applyRangeCursor()`）隨模式自動切 grab ↔ 預設。 |
+| `templates/calculator.html` | F/R 溫度 `param-card` 新增 `<input id="paramCaptureAvgTemp">` + `<label>抓取平均溫度</label>`，title 說明兩種模式的對應行為。cache buster `?v=11` → `?v=12` 強刷瀏覽器 cache。 |
+| `static/js/calculator.js` | cursor 兩處 init 都改成讀 `paramCaptureAvgTemp` 狀態決定 `fixedSpanMinutes`。Checkbox change handler 呼叫 `cursor.setFixedSpanMinutes(checked ? null : 1445)` 即時切換。Checkbox 不列入 `recompute` 名單（它不影響 `calculateStatistics` 輸入，只影響 cursor 拖曳模式）。 |
+
+**行為對照**：
+
+| Checkbox 狀態 | X-line 模式 | 用途 |
+|---|---|---|
+| 不勾（出廠預設） | 鎖 1445 min 固定窗口 | 標準 EF 評等計算 |
+| 勾 | 左右各自獨立移動（舊行為） | 手動選範圍 debug 平均溫度 |
+
+### 驗證結果
+
+- `node --check static/js/chart-utils.js` ✓
+- `node --check static/js/calculator.js` ✓
+- 邏輯模擬（`clampWindowToChart`）：5 個情境全通過
+    - 資料 = 24h (< span) → 窗口縮成全段範圍
+    - 資料 = 3 天，右端錨 → 涵蓋最後 1445 min
+    - 拖右 bar 超出右邊界 → clamp 後 span 仍 = 1445
+    - 拖左 bar 超出左邊界 → clamp 後 span 仍 = 1445
+    - 拖中段 range 平移 30 min → 整段跟著 shift，span 仍 = 1445
+- 線上 curl `http://10.35.31.10:5000/calculator`：第 83-84 行 `<input id="paramCaptureAvgTemp">` + `<label>抓取平均溫度</label>` 已上線 ✓
+- 線上 curl `static/js/chart-utils.js`：`setFixedSpanMinutes` / `applyRangeCursor` 符號都在 ✓
+- 線上 curl `static/js/calculator.js`：`captureAvgTempEl` / `setFixedSpanMinutes(checked ? null : 1445)` 都在 ✓
+
+### 部署記錄
+
+- **OTA host**：`http://10.35.31.10:5000`
+- **OTA token 指紋**：`750f9385`（SHA-256 前 8 碼）
+- **r11 推送**（13:43）：
+    - 2 檔：`static/js/chart-utils.js` (18,006 B) + `static/js/calculator.js` (36,059 B)
+    - 未重啟（純 JS，Flask 不 cache 靜態檔，瀏覽器重整即生效）
+    - 備份：`config\ota_backup\20261006_134342\`
+- **r12 推送**（13:53）：
+    - 3 檔：`templates/calculator.html` (4,440 B) + `static/js/chart-utils.js` (19,723 B) + `static/js/calculator.js` (36,904 B)
+    - 重啟（HTML 模板必須清 Jinja2 in-memory cache 才會吐新版）
+    - 備份：`config\ota_backup\20261006_135319\`
+    - `POST /api/admin/restart` → `restart_in_sec: 2` → watchdog 6 秒後接回，curl 拿到新版 4,299 B 含 checkbox
+
