@@ -9,8 +9,12 @@
 //   chartColors()                       → { text, textStrong, grid, bg }
 //   buildLineChart(canvas, opts)       → Chart 實例（time scale + 線圖 dataset）
 //   createCursorOverlay(opts)          → { overlay, barLeft, barRight, range, timeLeft, timeRight,
-//                                           setPositions(tsL, tsR), resetPositions(span=1/3,2/3),
+//                                           setPositions(tsL, tsR), setFixedSpanMinutes(min|null),
+//                                           resetPositions(span=1/3,2/3),
 //                                           bindDrag(onChange), formatTs(d) }
+//   另支援 opts.fixedSpanMinutes：傳入後 cursor 變成「固定寬度窗口」：
+//     - 拖任一條 X-line（或中間 highlight range）都會同步移動起訖，跨度鎖在 fixedSpanMinutes
+//     - setPositions(L, R) 會以 L 為錨點，自動把 R 設為 L + span（並 clamp 到 chart 範圍）
 //   roundHalfUp(n, digits=0)           → number（與 Python round 一致，5 永遠進位）
 //
 // v1 範圍（index.html 既有功能）：
@@ -138,9 +142,13 @@
    * @param {Chart}        opts.chart       Chart.js 實例（已建好）
    * @param {HTMLElement}  opts.overlay     cursorOverlay 容器（內含 barLeft / barRight / range / timeLeft / timeRight）
    * @param {Function}     opts.onChange    (tsLeft:Date, tsRight:Date) => void  拖曳中 / setPositions 時呼叫
+   * @param {number}     [opts.fixedSpanMinutes]  啟用「固定寬度窗口」模式（單位：分鐘）。
+   *                     傳入後拖任一條 X-line（或中間 highlight range）都會同步平移整段窗口，
+   *                     起訖永遠相隔 fixedSpanMinutes。setPositions(L, R) 也會以 L 為錨點強制設為固定寬度。
    * @returns {Object}   cursor controller
    *   - tsLeft, tsRight
    *   - setPositions(tsL, tsR)
+   *   - setFixedSpanMinutes(minutes | null)  動態切換「固定寬度窗口」模式（傳 null = 恢復預設各自移動）
    *   - resetPositions(fracL=1/3, fracR=2/3)
    *   - show() / hide()
    */
@@ -158,10 +166,19 @@
     const timeLeft  = overlay.querySelector('#cursorLeftTime');
     const timeRight = overlay.querySelector('#cursorRightTime');
 
+    // 固定窗口模式：null = 各自移動（預設，向後相容 index.html）
+    //              數字 = 跨度鎖在 fixedSpanMinutes，拖曳會同步平移
+    const fixedSpanMs = (typeof opts.fixedSpanMinutes === 'number' && opts.fixedSpanMinutes > 0)
+      ? Math.round(opts.fixedSpanMinutes * 60 * 1000)
+      : null;
+
     const state = {
       tsLeft: null,
       tsRight: null,
       enabled: false,  // 跟 main.js 的 cursorState.mode 對齊：true = 量測模式
+      fixedSpanMs,
+      // 拖 range（中段）平移時記錄起點，避免累積誤差
+      dragOriginCenterMs: null,
     };
 
     function clampToChart(xInChart) {
@@ -172,7 +189,38 @@
       return xInChart;
     }
 
+    /**
+     * 把 [L, R] 窗口 clamp 到 chart 範圍內，必要時縮短窗口以容納資料。
+     * 若資料長度 < 窗口寬度，會把窗口縮成跟資料一樣大（左 = min, 右 = max）。
+     */
+    function clampWindowToChart(L, R) {
+      const xScale = chart.scales.x;
+      if (!xScale || xScale.min == null || xScale.max == null) return { L, R };
+      const min = xScale.min, max = xScale.max;
+      let newL = L.getTime(), newR = R.getTime();
+      let span = newR - newL;
+      // 資料不足 → 直接吃完整段
+      if (max - min <= span) {
+        return { L: new Date(min), R: new Date(max) };
+      }
+      // 左邊超出 → 把窗口往左推（保留 span）
+      if (newL < min) { newL = min; newR = newL + span; }
+      // 右邊超出 → 把窗口往右拉（保留 span）
+      if (newR > max) { newR = max; newL = newR - span; }
+      return { L: new Date(newL), R: new Date(newR) };
+    }
+
     function setPositions(tsL, tsR) {
+      // 固定窗口模式：以 tsL 為錨點，自動補上固定寬度；再 clamp 到 chart 範圍
+      if (state.fixedSpanMs != null && tsL != null && tsR != null) {
+        const L = tsL instanceof Date ? tsL : new Date(tsL);
+        let R = tsR instanceof Date ? tsR : new Date(tsR);
+        // 強制寬度（以 L 為錨點）
+        R = new Date(L.getTime() + state.fixedSpanMs);
+        const clamped = clampWindowToChart(L, R);
+        tsL = clamped.L;
+        tsR = clamped.R;
+      }
       state.tsLeft = tsL instanceof Date ? tsL : new Date(tsL);
       state.tsRight = tsR instanceof Date ? tsR : new Date(tsR);
       layout();
@@ -219,6 +267,13 @@
       function onDown(e) {
         if (!state.enabled) return;
         dragging = true;
+        // range（中段）拖曳用：記下拖曳起點的「窗口中點」時間戳，
+        // 後續 onMove 用 delta = newTs - origin 來平移整段窗口
+        if (el === barLeft) dragOriginLeftMs = state.tsLeft ? state.tsLeft.getTime() : null;
+        else if (el === barRight) dragOriginRightMs = state.tsRight ? state.tsRight.getTime() : null;
+        else if (el === range) dragOriginCenterMs = (state.tsLeft && state.tsRight)
+          ? (state.tsLeft.getTime() + state.tsRight.getTime()) / 2
+          : null;
         el.setPointerCapture && el.setPointerCapture(e.pointerId != null ? e.pointerId : 0);
         e.preventDefault();
       }
@@ -234,12 +289,44 @@
         if (clamped == null) return;
         const ts = xScale.getValueForPixel(clamped);
         const newTs = new Date(ts);
-        if (el === barLeft) {
-          if (state.tsRight && newTs >= state.tsRight) return;
-          state.tsLeft = newTs;
+
+        if (state.fixedSpanMs != null) {
+          // === 固定窗口模式：左 / 右 / 中 三種拖法都同步平移 ===
+          if (el === barLeft) {
+            // 以「新的左邊」為錨點
+            const newL = newTs;
+            const newR = new Date(newL.getTime() + state.fixedSpanMs);
+            const c = clampWindowToChart(newL, newR);
+            state.tsLeft = c.L;
+            state.tsRight = c.R;
+          } else if (el === barRight) {
+            // 以「新的右邊」為錨點
+            const newR = newTs;
+            const newL = new Date(newR.getTime() - state.fixedSpanMs);
+            const c = clampWindowToChart(newL, newR);
+            state.tsLeft = c.L;
+            state.tsRight = c.R;
+          } else if (el === range && dragOriginCenterMs != null) {
+            // 以中點 delta 平移整段窗口
+            const delta = newTs.getTime() - dragOriginCenterMs;
+            if (delta !== 0) {
+              let newL = new Date(state.tsLeft.getTime() + delta);
+              let newR = new Date(state.tsRight.getTime() + delta);
+              const c = clampWindowToChart(newL, newR);
+              state.tsLeft = c.L;
+              state.tsRight = c.R;
+              dragOriginCenterMs = (c.L.getTime() + c.R.getTime()) / 2;
+            }
+          }
         } else {
-          if (state.tsLeft && newTs <= state.tsLeft) return;
-          state.tsRight = newTs;
+          // === 預設模式：左 / 右 各自獨立移動 ===
+          if (el === barLeft) {
+            if (state.tsRight && newTs >= state.tsRight) return;
+            state.tsLeft = newTs;
+          } else if (el === barRight) {
+            if (state.tsLeft && newTs <= state.tsLeft) return;
+            state.tsRight = newTs;
+          }
         }
         layout();
         onChange(state.tsLeft, state.tsRight);
@@ -247,17 +334,24 @@
 
       function onUp() {
         dragging = false;
+        el = null;
+        dragOriginCenterMs = null;
+        dragOriginLeftMs = null;
+        dragOriginRightMs = null;
       }
 
       let dragging = false;
       let el = null;
+      let dragOriginCenterMs = null;
+      let dragOriginLeftMs = null;
+      let dragOriginRightMs = null;
 
       // 對 left / right 各綁一次（用 closure 區分）
       [barLeft, barRight].forEach((bar) => {
         if (!bar) return;
         const localOnDown = (e) => { if (state.enabled) { el = bar; onDown(e); } };
         const localOnMove = (e) => { if (el === bar) onMove(e); };
-        const localOnUp   = (e) => { if (el === bar) { onUp(e); el = null; } };
+        const localOnUp   = (e) => { if (el === bar) onUp(e); };
         bar.addEventListener('mousedown', localOnDown);
         bar.addEventListener('touchstart', localOnDown, { passive: false });
         window.addEventListener('mousemove', localOnMove);
@@ -265,6 +359,34 @@
         window.addEventListener('mouseup', localOnUp);
         window.addEventListener('touchend', localOnUp);
       });
+
+      // 中段 highlight range 拖曳（永遠綁定 handler，僅在固定窗口模式生效）：
+      //   拖中段可以平移整段窗口，比分別拖兩條 X-line 直覺
+      //   「僅固定窗口模式生效」是在 onMove 內判斷 fixedSpanMs；
+      //   這樣可以在 runtime 切換模式而不必 rebind。
+      if (range) {
+        applyRangeCursor();
+        const localOnDown = (e) => {
+          if (!state.enabled || state.fixedSpanMs == null) return;
+          el = range;
+          range.style.cursor = 'grabbing';
+          onDown(e);
+        };
+        const localOnMove = (e) => { if (el === range) onMove(e); };
+        const localOnUp   = (e) => { if (el === range) { applyRangeCursor(); onUp(e); } };
+        range.addEventListener('mousedown', localOnDown);
+        range.addEventListener('touchstart', localOnDown, { passive: false });
+        window.addEventListener('mousemove', localOnMove);
+        window.addEventListener('touchmove', localOnMove, { passive: false });
+        window.addEventListener('mouseup', localOnUp);
+        window.addEventListener('touchend', localOnUp);
+      }
+    }
+
+    // 根據目前模式更新 range 的滑鼠游標：固定模式 = grab，預設模式 = default
+    function applyRangeCursor() {
+      if (!range) return;
+      range.style.cursor = (state.fixedSpanMs != null) ? 'grab' : '';
     }
 
     function show() {
@@ -285,11 +407,37 @@
 
     bindDrag();
 
+    /**
+     * 動態切換「固定寬度窗口」模式。
+     *   minutes == null 或 <= 0  → 恢復預設「左 / 右各自獨立移動」（並還原 range 的游標）
+     *   minutes > 0              → 啟用固定寬度，並把現有窗口重新錨在 tsLeft，強制 tsRight = tsLeft + span
+     */
+    function setFixedSpanMinutes(minutes) {
+      if (minutes == null || !(minutes > 0)) {
+        state.fixedSpanMs = null;
+        applyRangeCursor();
+        return;
+      }
+      state.fixedSpanMs = Math.round(minutes * 60 * 1000);
+      // 切回固定模式：以 tsLeft 為錨點重新設定（保留使用者目前位置，只鎖寬度）
+      if (state.tsLeft && state.tsRight) {
+        const newR = new Date(state.tsLeft.getTime() + state.fixedSpanMs);
+        const c = clampWindowToChart(state.tsLeft, newR);
+        state.tsLeft = c.L;
+        state.tsRight = c.R;
+        layout();
+        onChange(state.tsLeft, state.tsRight);
+      }
+      applyRangeCursor();
+    }
+
     return {
       get tsLeft()  { return state.tsLeft; },
       get tsRight() { return state.tsRight; },
       get enabled() { return state.enabled; },
+      get fixedSpanMinutes() { return state.fixedSpanMs == null ? null : state.fixedSpanMs / 60000; },
       setPositions,
+      setFixedSpanMinutes,
       resetPositions,
       layout,
       show,

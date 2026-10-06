@@ -567,6 +567,16 @@
       el.addEventListener(evt, recompute);
     });
 
+    // 「抓取平均溫度」 checkbox 只控制 cursor 拖曳模式，
+    // 不影響 calculateStatistics 輸入 → 不列入 recompute 名單。
+    // checked   → 改為「x-line 左右各自移動」（可以手動選範圍抓平均）
+    // unchecked → 恢復「x-line 鎖在 1445 min 固定窗口」
+    const captureAvgTempEl = document.getElementById('paramCaptureAvgTemp');
+    captureAvgTempEl.addEventListener('change', () => {
+      if (!cursor) return;
+      cursor.setFixedSpanMinutes(captureAvgTempEl.checked ? null : 1445);
+    });
+
     // 初始化空 chart
     const canvas = document.getElementById('calcChart');
     chart = ChartUtils.buildLineChart(canvas, {
@@ -575,10 +585,14 @@
     });
 
     // 建立 cursor overlay
+    //   初始模式讀「抓取平均溫度」 checkbox 狀態：
+    //     checked   → fixedSpanMinutes = null   （左右各自移動）
+    //     unchecked → fixedSpanMinutes = 1445   （預設：鎖 1445 min 窗口）
     cursor = ChartUtils.createCursorOverlay({
       chart,
       overlay: document.getElementById('calcCursorOverlay'),
       onChange: () => recompute(),
+      fixedSpanMinutes: captureAvgTempEl.checked ? null : 1445,
     });
 
     document.getElementById('connText').textContent = '請載入 CSV';
@@ -615,11 +629,11 @@
     // 重建 chart datasets（依欄位數自動配色）
     rebuildChart();
 
-    // 預設 cursor 放在 1/4 / 3/4 位置
-    cursor.setPositions(
-      result.datetime[0],
-      result.datetime[result.datetime.length - 1]
-    );
+    // 預設 cursor：右端錨在資料最後，向左抓 1445 分鐘（涵蓋剛好 24H+5min 的「一天結束」窗口）
+    //   setPositions 內部在 fixedSpanMinutes 模式下會自動 clamp 到 chart 範圍，
+    //   所以資料不足 1445 分鐘時會自動縮成全段範圍。
+    const lastTs = result.datetime[result.datetime.length - 1];
+    cursor.setPositions(lastTs, lastTs);
     cursor.show();
     recompute();
   }
@@ -659,10 +673,13 @@
     chart.update('none');
 
     // 重建 cursor（因為 chart 重建了，舊的綁定失效）
+    //   同 init 樣：以 checkbox 為準重設模式
+    const captureAvgEl = document.getElementById('paramCaptureAvgTemp');
     cursor = ChartUtils.createCursorOverlay({
       chart,
       overlay: document.getElementById('calcCursorOverlay'),
       onChange: () => recompute(),
+      fixedSpanMinutes: captureAvgEl && captureAvgEl.checked ? null : 1445,
     });
     cursor.show();
   }
