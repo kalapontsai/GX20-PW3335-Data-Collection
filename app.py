@@ -1889,6 +1889,11 @@ def api_export_csv(station: str):
     # 注意：不能用 utf-8-sig，否則會把 BOM 再算一次，Content-Length 偏多 3 byte，
     # 瀏覽器讀到一半就關連線 → 最後一個中文字被切壞 → Excel 顯示 ? 亂碼。
     body_bytes = csv_text.encode("utf-8")
+    # mimetype 只寫 "text/csv"，不寫 "text/csv; charset=utf-8"：
+    # Flask/Werkzeug 對 text/* 預設會自動附加 "; charset=utf-8"，
+    # 雙重宣告會出現 "text/csv; charset=utf-8; charset=utf-8" 的怪 header。
+    # 靠 Werkzeug 預設行為反而最乾淨。若日後要明確宣告，改用 content_type=
+    # 而非 mimetype=，以免再被 Werkzeug 解析後雙重 append。
     return Response(
         body_bytes,
         mimetype="text/csv",

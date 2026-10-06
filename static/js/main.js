@@ -1279,6 +1279,12 @@ async function exportCurrentStationAsCsv() {
     const csvText = await r.text();
     const suggestedName = defaultFilename(xMin);
 
+    // 統一構造 Blob（剝掉既有 BOM 再加回，確保剛好 1 個 BOM、UTF-8 編碼）。
+    // 兩條下載路徑（File System Access + <a download>）共用同一 Blob，
+    // 避免 FSA 路徑直接 writable.write(csvText)（raw JS string）漏 BOM，
+    // 造成檔案無 BOM → Excel 開檔走 CP950 mojibake → re-save 後 E4 B8 3F 損壞。
+    const blob = new Blob(["\ufeff" + csvText.replace(/^\ufeff/, "")], { type: "text/csv;charset=utf-8" });
+
     if (window.showSaveFilePicker) {
       // Chrome/Edge 的 File System Access API
       try {
@@ -1290,7 +1296,7 @@ async function exportCurrentStationAsCsv() {
           }],
         });
         const writable = await handle.createWritable();
-        await writable.write(csvText);
+        await writable.write(blob);   // ← 寫 Blob，不再傳 raw string
         await writable.close();
         return;
       } catch (e) {
@@ -1300,7 +1306,6 @@ async function exportCurrentStationAsCsv() {
     }
 
     // Fallback：建立隱形 <a download>
-    const blob = new Blob(["\ufeff" + csvText.replace(/^\ufeff/, "")], { type: "text/csv;charset=utf-8" });
     const dlUrl = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = dlUrl;
