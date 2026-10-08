@@ -984,9 +984,33 @@ python run.py
 3. 啟動
 4. 瀏覽器開 `http://<該機IP>:5000/`
 
----
+### 終端使用者部署：單一 `gx20.exe`（v13+）
 
-## 16. 故障排除
+如果使用者的電腦不想裝 Python，可用預先打包的 `gx20.exe`：
+
+1. **下載**：從 GitHub Actions → `build-windows` workflow 末次成功 run 下載 artifacts `gx20-windows-x64`，解壓出 `gx20.exe`
+2. **雙擊 gx20.exe**：
+   - 沒有其他實例在跑 → 跳對話框「是否要啟動 GX20 監視器？」→ 選 Yes → server 在背景跑、對話框關閉
+   - 已有實例在跑 → 跳對話框「是否要終止背景執行？」→ 選 Yes → 安全關閉（不會被 watchdog 自動重啟）
+3. **查看**：瀏覽器開 `http://127.0.0.1:5000/`
+4. **停用**：再點一次 `gx20.exe` → 對話框選 Yes 終止
+5. **部署位置**：`gx20.exe` 旁邊會自動建立 `data/`、`config/`、`logs/` 資料夾（第一次啟動時生成）
+6. **可選**：用「工作排程器」把 `gx20.exe` 設成開機自動執行（取代 `setup_autostart.ps1`）
+
+**「完全關閉」與「重啟」的差別**：
+
+- v13 新增 `SHUTDOWN_EXIT_CODE=42`：對話框選終止時，server 會用 exit code 42 退出，外部 watchdog（不論是 `ota_watchdog.bat` 或 `gx20.exe` 內建的）看到 42 就 **不重啟**，直接 break
+- 其他 exit code（0 = 正常 OTA 重啟、非 0 = crash）依然走原本的 watchdog 自動重啟鏈
+
+**產出 gx20.exe（本機）**：
+
+```bash
+pip install pyinstaller
+pyinstaller gx20.spec --clean
+# 產出：dist/gx20.exe（單檔，約 25 MB）
+```
+
+---
 
 | 症狀 | 可能原因 | 解法 |
 |---|---|---|

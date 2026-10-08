@@ -101,6 +101,13 @@ set EXITCODE=%ERRORLEVEL%
 echo [%date% %time%] [INFO] pythonw app.py exited, code=%EXITCODE%
 echo [%date% %time%] [INFO] pythonw app.py exited, code=%EXITCODE% >> %LOGFILE%
 
+REM code 42 = launcher 要求的「完全關閉」（不會被重啟）→ break watchdog
+if %EXITCODE% EQU 42 (
+    echo [%date% %time%] [INFO] Received SHUTDOWN_EXIT_CODE=42, exiting watch dog without restart.
+    echo [%date% %time%] [INFO] Received SHUTDOWN_EXIT_CODE=42, exiting watch dog without restart. >> %LOGFILE%
+    exit /b 42
+)
+
 REM code 0  = normal exit (OTA self-restart)
 REM code !=0 = abnormal crash
 if %EXITCODE% NEQ 0 (

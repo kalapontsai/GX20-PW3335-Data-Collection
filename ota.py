@@ -273,6 +273,37 @@ def schedule_restart(delay_sec: int = 2) -> dict:
         return {"ok": False, "error": str(e)}
 
 
+# 給 launcher 用的「終止背景執行」sentinel：
+# - 不同於 schedule_restart (exit 0 → watch dog 自動 restart)
+# - exit SHUTDOWN_EXIT_CODE → watch dog / launcher 都應該視為「完全關閉」並 break
+SHUTDOWN_EXIT_CODE = 42
+
+
+def schedule_shutdown(delay_sec: int = 1) -> dict:
+    """
+    排程自我關閉（不會被 watchdog 自動重啟）。
+
+    用途：gx20.exe 的 launcher 想關閉背景 server 時呼叫。
+    exit code 採 SHUTDOWN_EXIT_CODE = 42，launcher 與 watchdog 都認這個 code
+    並停止重啟迴圈。
+
+    適用環境：
+      - 透過 gx20.exe 啟動（GX20_MODE=server，launcher 內的 watchdog 會接 SHUTDOWN_EXIT_CODE）
+      - 或透過 ota_watchdog.bat 啟動（傳統部署）
+    """
+    try:
+        log.warning("已排程關閉（%d 秒後退出，sentinel=%d）", delay_sec, SHUTDOWN_EXIT_CODE)
+        def _do_exit():
+            time.sleep(max(0.5, delay_sec))
+            log.warning("關閉：主進程退出中（exit code=%d, 不會被重啟）…", SHUTDOWN_EXIT_CODE)
+            os._exit(SHUTDOWN_EXIT_CODE)
+        threading.Thread(target=_do_exit, daemon=True).start()
+        return {"ok": True, "shutdown_in_sec": delay_sec, "exit_code": SHUTDOWN_EXIT_CODE}
+    except Exception as e:
+        log.exception("排程關閉失敗: %s", e)
+        return {"ok": False, "error": str(e)}
+
+
 # ============================================================
 # 工具
 # ============================================================

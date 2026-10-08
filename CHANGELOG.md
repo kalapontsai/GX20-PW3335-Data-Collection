@@ -1133,3 +1133,60 @@ alias 全等於 `default_alias()` 時就**不寫實際值**，只標記 `null`�
     - 備份：`config\ota_backup\20261006_135319\`
     - `POST /api/admin/restart` → `restart_in_sec: 2` → watchdog 6 秒後接回，curl 拿到新版 4,299 B 含 checkbox
 
+
+---
+
+## 15. 現況進度（2026-10-08 Windows x64 執行檔 + launcher v13）
+
+### 變更內容
+
+#### v13 — `gx20.exe` 終端使用者版 + 單一實例 + 對話框
+
+**動機**：現有部署鏈（`ota_watchdog.bat` / `start_forever.bat` / `setup_autostart.ps1`）對「終端使用者」不友善 —
+需要裝 Python、設 PATH、設工作排程器。本版把整個專案包成單一 `gx20.exe`，連點兩下就能跑 / 關。
+
+**新檔**：
+
+| 檔 | 用途 |
+|---|---|
+| `launcher.py` | 點 exe 時跑的 Tkinter 對話框（單檔，零外部相依）|
+| `gx20.spec` | PyInstaller 設定（onefile + windowed + UPX）|
+| `.github/workflows/build-windows.yml` | GitHub Action 自動打包 + 上傳 artifacts |
+
+**改檔**：
+
+| 檔 | 變更 |
+|---|---|
+| `ota.py` | 新增 `SHUTDOWN_EXIT_CODE = 42` sentinel 與 `schedule_shutdown()`：exit 42 → 外部 watchdog 視為「完全關閉」而非「需要重啟」 |
+| `app.py` | 新增 `POST /api/admin/shutdown` endpoint（沿用既有 `_ota.is_allowed_ip` + `X-OTA-Token` 認證）|
+| `ota_watchdog.bat` | 認 SHUTDOWN_EXIT_CODE=42：exit 42 時直接 `exit /b 42` 不重啟 |
+
+**UX 流程**：
+
+```
+點 gx20.exe
+  ↓
+用 Named Mutex 偵測是否已有實例
+  ├─ 無實例 → 對話框「是否啟動？」 Yes → background spawn server, 離開 / No → 離開
+  └─ 有實例 → 對話框「是否終止？」 Yes → POST /api/admin/shutdown, 離開 / No → 離開
+```
+
+**設計決策**：
+
+1. **背景執行**：用 `subprocess.Popen` + `DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP`，父進程退出後子進程不跟著死
+2. **單一實例偵測**：Named Mutex `Global\GX20PW3335Monitor`（跨 session 偵測）+ port 5000 佔用雙保險
+3. **終止不用 restart**：現有 `/api/admin/restart` exit 0 會被 watchdog 自動重啟（設計如此），所以加 `SHUTDOWN_EXIT_CODE=42` 區分「要重啟」vs「完全關閉」
+4. **對話框用 Tkinter**：Python 內建、零外部相依；對終端使用者也直觀
+5. **launcher 與 watchdog 一致**：`launcher.py` 在 server mode 自帶 watchdog 迴圈（認 SHUTDOWN_EXIT_CODE=42），傳統 `ota_watchdog.bat` 部署也認 → 兩條啟動鏈 UX 一致
+
+**驗證**：
+
+- GitHub Action 觸發：push 到 `feat/windows-exe-launcher` → `.github/workflows/build-windows.yml` 跑 PyInstaller → 上傳 `gx20.exe` 到 artifacts
+- 開發端本機驗證：`pyinstaller gx20.spec --clean` → 產 `dist/gx20.exe`
+- Linux runner 端只能驗證 syntax + import（不能跑 Windows GUI）；WexWindows GUI 測試留給手動點 exe
+
+**未做（v13+ 待辦）**：
+
+- systray icon 與右鍵選單（要求外的擴充，Kadela 已選 A 方案）
+- 程式碼簽章（`codesign_identity` 留 None，企業內部署可之後加）
+- Release workflow（產物上 GitHub Releases）— 現版只到 artifacts，需要時另開 workflow

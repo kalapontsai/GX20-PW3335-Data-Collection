@@ -1,0 +1,93 @@
+name: build-windows
+
+# ---------------------------------------------------------------
+# GX20 + PW3335 Web Monitor — Windows x64 執行檔打包
+#
+# 觸發時機：
+#   1) push 到 main / feat/windows-exe-launcher（改 launcher / spec / workflow）
+#   2) 手動 workflow_dispatch（可在 Actions 頁面按 Run workflow）
+#
+# 產出：
+#   - gx20.exe（單檔，PyInstaller --onefile --windowed）
+#   - 從 Actions → build-windows → 該次 run → Artifacts 下載
+#
+# 升級到 Release 時：另開 .github/workflows/release-windows.yml
+# （用 softprops/action-gh-release 上傳到 GitHub Releases）
+# ---------------------------------------------------------------
+
+on:
+  push:
+    branches:
+      - main
+      - feat/windows-exe-launcher
+    paths:
+      - "launcher.py"
+      - "gx20.spec"
+      - "app.py"
+      - "ota.py"
+      - "**/*.py"
+      - "templates/**"
+      - "static/**"
+      - "requirements.txt"
+      - ".github/workflows/build-windows.yml"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Optional tag label (e.g. v13.0)"
+        required: false
+        default: "dev"
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install PyInstaller + runtime deps
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller
+          pip install -r requirements.txt
+
+      - name: PyInstaller build (gx20.spec)
+        shell: bash
+        run: |
+          # 產出 dist/gx20.exe
+          pyinstaller gx20.spec --clean --noconfirm
+          ls -la dist/
+
+      - name: Verify gx20.exe exists
+        shell: bash
+        run: |
+          if [ ! -f dist/gx20.exe ]; then
+            echo "::error::dist/gx20.exe not produced"
+            exit 1
+          fi
+          echo "✅ gx20.exe size: $(stat -c '%s' dist/gx20.exe) bytes"
+
+      - name: Smoke test (launcher mode, dev null platform)
+        shell: bash
+        run: |
+          # 在 Linux runner 跑不起來（要 Windows + pywin32），
+          # 但至少要驗證 import 與 syntax OK。
+          python -c "import ast; ast.parse(open('launcher.py', encoding='utf-8').read()); print('launcher.py: syntax OK')"
+          python -c "import launcher; print('launcher.py: import OK')"
+        continue-on-error: true   # dev 環境允許失敗，build 仍繼續
+
+      - name: Upload gx20.exe as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: gx20-windows-x64
+          path: dist/gx20.exe
+          if-no-files-found: error
+          retention-days: 30

@@ -1681,6 +1681,35 @@ def api_admin_restart():
     return jsonify(_ota.schedule_restart(delay_sec=delay))
 
 
+@app.route("/api/admin/shutdown", methods=["POST"])
+def api_admin_shutdown():
+    """
+    觸發自我關閉（v13+：給 gx20.exe launcher 用）。
+    Header: X-OTA-Token: <token>
+    Body 可省略；或 {"delay": 1} 表示延遲秒數（0~10）。
+
+    與 /api/admin/restart 的差異：
+      - restart → exit 0 → watch dog / launcher 自動重啟
+      - shutdown → exit SHUTDOWN_EXIT_CODE (=42) → watch dog / launcher 不重啟，直接 break
+
+    IP 白名單同其他 admin endpoint（沿用 _ota.is_allowed_ip）。
+    """
+    if not _ota.is_allowed_ip(request.remote_addr):
+        log.warning("api_admin/shutdown 被擋（非白名單 IP=%s）", request.remote_addr)
+        return jsonify({"ok": False, "error": "forbidden"}), 403
+    if not _ota.check_token(request.headers.get("X-OTA-Token")):
+        return jsonify({"ok": False, "error": "invalid or missing token"}), 401
+    body = request.get_json(silent=True) or {}
+    try:
+        delay = int(body.get("delay", 1))
+    except (TypeError, ValueError):
+        delay = 1
+    delay = max(0, min(delay, 10))
+    log.warning("管理員觸發自我關閉（%d 秒後，sentinel=%d）",
+                delay, _ota.SHUTDOWN_EXIT_CODE)
+    return jsonify(_ota.schedule_shutdown(delay_sec=delay))
+
+
 @app.route("/api/admin/clear_log", methods=["POST"])
 def api_admin_clear_log():
     """
