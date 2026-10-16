@@ -152,6 +152,26 @@ async function init() {
   socket.on("connect",    () => updateConn(true,  null));
   socket.on("disconnect", () => updateConn(false, "SocketIO 斷線"));
   socket.on("new_sample", onNewSample);
+  // v12.1：備註欄多瀏覽器同步 — 本機透過 PUT /api/note_box/<station>
+  // 寫入後，後端會 emit `note_box_updated`；其他瀏覽器收到後即時更新 #noteBox，
+  // 避免遠端還停在舊備註（遠端為唯讀，收到事件只更新顯示，不會回送 server）。
+  socket.on("note_box_updated", (payload) => {
+    if (!payload || typeof payload !== "object") return;
+    const st = payload.station;
+    const note = (typeof payload.note === "string") ? payload.note : "";
+    if (!st) return;
+    if (!GX20State.settings) GX20State.settings = {};
+    if (!GX20State.settings.notes) GX20State.settings.notes = {};
+    // 寫回記憶體（讓下次切工位 / 拉整包 settings 仍是新值）
+    GX20State.settings.notes[st] = note;
+    // 若當前顯示的就是這個工位 → 即時更新 #noteBox
+    if (st === currentStation) {
+      const box = document.getElementById("noteBox");
+      if (box && box.value !== note) {
+        box.value = note;
+      }
+    }
+  });
 
   setInterval(refreshConnStatus, 5000);
   refreshConnStatus();

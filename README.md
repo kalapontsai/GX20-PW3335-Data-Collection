@@ -4,6 +4,8 @@
 >
 > 6 工位 × 20 接點 = 120 點溫度 + 6 工位 V/I/W 三相電力，每 10 秒取樣一次，**可持續記錄 7 天以上**
 >
+> **v12.1** 改版重點：新增 per-station 備註 API `/api/note_box/<station>`（GET/PUT），外部 client 不再需要拉整包 `/api/settings` 才能讀寫單一工位備註；寫入後 emit `note_box_updated` socket 事件，多瀏覽器即時同步（沿用 v8.1.2 本機可寫 / 遠端唯讀）
+>
 > **v12.0.2** 改版重點：calculator 頁 x-line 改為固定 1445 min 窗口（拖任一條或中段 highlight 都同步平移）；F/R 溫度 block 新增「抓取平均溫度」 checkbox，勾選即恢復左右各自獨立移動模式
 >
 > **v12.0.1** 改版重點：備註欄上限 30 → 255 字（HTML / JS / 後端 / 歸檔 meta 5 個層級一致）+ `ota.py` `uptime_seconds` 改用 module-level `_BOOT_TIME`，重啟後首呼正確反映 process 啟動時間
@@ -863,6 +865,8 @@ data/
 | `/api/debug` | GET | 讀取 debug 狀態 |
 | `/api/debug` | POST | 切換 debug 狀態（`{"enabled": true/false}`）|
 | `/api/debug/log_tail` | GET | 查 `logs/app.log` 末段（`?lines=N`）|
+| `/api/note_box/<station>` | GET | **v12.1** 讀單一工位備註（`{ok, station, note}`，備註上限 255 字） |
+| `/api/note_box/<station>` | PUT | **v12.1** 寫單一工位備註；body `{"note":"..."}`（或 `{"notes":{"<station>":"..."}}`）。**v8.1.2** 起遠端瀏覽器呼叫會被 403 擋下（本機 `127.0.0.1` / `::1` 才能寫）。寫入後 emit `note_box_updated` socket 事件 |
 
 ### Admin（OTA 用，頭帶 `X-OTA-Token`）
 
@@ -881,6 +885,8 @@ data/
 | `new_sample` | S → C | `{ts, station, temps:[20], rate:[20], avg:[20]}` |
 
 每 10 秒廣播一次給所有連線的瀏覽器分頁。
+
+| `note_box_updated` | S → C | **v12.1** `{station, note}`。本機寫入備註後即時廣播給所有 client；遠端瀏覽器收到只更新 `#noteBox` 顯示，不會回送 server（沿用 v8.1.2 「本機可寫 / 遠端唯讀」政策） |
 
 ---
 

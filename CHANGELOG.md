@@ -22,6 +22,7 @@
 12. [現況進度（2026-09-18 工位5 t20 轉 5V）](#12-現況進度2026-09-18-工位5-t20-轉-5v)
 13. [現況進度（2026-10-05 備註 30→255 + OTA uptime 首呼修正）](#13-現況進度2026-10-05-備註-30255--ota-uptime-首呼修正)
 14. [現況進度（2026-10-06 calculator x-line 固定 1445 min + 抓取平均溫度 toggle）](#14-現況進度2026-10-06-calculator-x-line-固定-1445-min--抓取平均溫度-toggle)
+15. [現況進度（2026-10-16 per-station 備註 API + socket 同步 v12.1）](#15-現況進度2026-10-16-per-station-備註-api--socket-同步-v121)
 
 ---
 
@@ -49,6 +50,7 @@
 | **v12.0 r10** | 2026-10-05 | `ota.py` `uptime_seconds` 改用 module-level `_BOOT_TIME`，process 重啟後首呼正確顯示啟動以來的時間（修前必回 0.0）|
 | **v12.0 r11** | 2026-10-06 | calculator 頁 x-line 改為固定 1445 min 窗口（拖任一條或中段 highlight 都同步平移）；index.html 不受影響 |
 | **v12.0 r12** | 2026-10-06 | calculator 頁能耗參數 - F/R 溫度 block 新增「抓取平均溫度」 checkbox；勾選→x-line 恢復左右各自移動；不勾→鎖 1445 min 固定窗口 |
+| **v12.1** | 2026-10-16 | per-station 備註 API：新增 `GET / PUT /api/note_box/<station>`，外部 client 可獨立讀寫單一工位備註；寫入後 emit `note_box_updated` socket 事件 → 多瀏覽器即時同步；沿用 v8.1.2 本機可寫 / 遠端唯讀政策 |
 
 ## 12. 現況進度（2026-09-18 工位5 t20 轉 5V）
 
@@ -1133,3 +1135,54 @@ alias 全等於 `default_alias()` 時就**不寫實際值**，只標記 `null`�
     - 備份：`config\ota_backup\20261006_135319\`
     - `POST /api/admin/restart` → `restart_in_sec: 2` → watchdog 6 秒後接回，curl 拿到新版 4,299 B 含 checkbox
 
+
+## 15. 現況進度（2026-10-16 per-station 備註 API + socket 同步 v12.1）
+
+### 變更內容
+
+**問題**：v10.x 起 6 工位備註（note box）只透過 `POST /api/settings` 整包 PATCH 寫入。外部 client（BI 報表、第三方監控、自動化腳本）若只想讀/寫單一工位備註，必須先拉整包 settings → 改一個 key → 整包送回，既浪費頻寬也容易踩到 v8.1.2 「整包 PATCH 會清空其他欄位」的雷。
+
+**新增 API**：
+
+- `GET /api/note_box/<station>` — 讀單一工位備註；回 `{ok, station, note}`，note 最多 255 字，未設定時為空字串。任何來源都能讀（備註本來就是公開資訊）
+- `PUT /api/note_box/<station>` — 寫單一工位備註；body `{"note": "..."}`（同時相容 `{"notes": {"<station>": "..."}}` 形狀以配合既有整包 PATCH 流程）。沿用 v8.1.2 `_is_local_request()` 鎖，遠端 403，本機 127.0.0.1 / ::1 才能寫
+- 寫入後 emit SocketIO 事件 `note_box_updated`（payload `{station, note}`）廣播給所有 client
+
+**前端**：`static/js/main.js` 新增 socket 監聽 `note_box_updated`，收到後即時更新 `#noteBox`（遠端瀏覽器收到只更新顯示，不會回送 server，沿用「本機可寫 / 遠端唯讀」政策）。
+
+**取捨 / 設計取捨**：
+
+- 沿用既有 `notes` 儲存結構（settings 內 per-station 字串、255 字上限）→ 不改 schema、不寫 migration
+- 寫入仍走 `save_settings({"notes": {st: "…"}})` 既有鏈 → 自動同步 dump `config/settings.json`，跟 `POST /api/settings` 行為 100% 一致
+- 廣播事件命名 `note_box_updated` 對齊 README 命名（resource_action 格式），未來若需要廣播其他 per-station 設定可走 `setting_updated` 統一
+
+**API 契約**：
+
+| Method | Path | 權限 | Body | 成功回應 | 錯誤 |
+|---|---|---|---|---|---|
+| GET | `/api/note_box/<station>` | 任何來源 | — | `{ok, station, note}` | 404 unknown station |
+| PUT | `/api/note_box/<station>` | 本機 127.0.0.1 / ::1 | `{"note": "string"}` | `{ok, station, note}` | 400 body 格式 / 403 遠端 / 404 unknown station |
+| — | SocketIO `note_box_updated` | S → C | — | `{station, note}` | — |
+
+**端到端 smoke（13 條全綠）**：
+
+- T1 GET 不存在備註 → 回空字串
+- T2 PUT 本機寫入
+- T3 GET 讀回剛剛寫的（持久化驗證）
+- T4 PUT 300 字 → 自動截斷到 255
+- T5 PUT 空字串 → 清空備註
+- T6 PUT 未知工位 → 404
+- T7 GET 未知工位 → 404
+- T8 PUT body 為 list `[]` → 400（不是誤當成 dict）
+- T9 PUT note 為非字串 → 400
+- T10 PUT 用 `notes[station]` 形狀（向後相容）
+- T11 PUT 不影響其他工位
+- T12 寫入後 `GET /api/settings` 內 notes 同步更新
+- T13 socket 客戶端收到 `note_box_updated` 事件（payload 完整）
+
+### 修改檔案
+
+- `app.py` — 新增兩個 route（`/api/note_box/<station>` GET/PUT）
+- `static/js/main.js` — 新增 socket 監聽 `note_box_updated`
+- `README.md` — §12 路由表 + SocketIO 事件表 + 開頭 v12.1 改版重點
+- `CHANGELOG.md` — §15 v12.1 完整現況進度

@@ -1008,6 +1008,90 @@ def api_set_settings():
     return jsonify({"ok": True})
 
 
+# v12.1：per-station 備註欄（note box）獨立 API
+# 原本備註只能透過 POST /api/settings 整包 PATCH 寫入；外部 client
+# （如 BI 報表、第三方監控）若只想讀/寫單一工位的備註，要先拉整包 settings、
+# 改一個 key、再整包送回——既浪費頻寬也容易踩到 v8.1.2 的「整包 PATCH
+# 會清空其他欄位」雷。這兩條 route 提供精準的 per-station 介面。
+#
+# 設計：
+#   - 沿用既有 `notes` 儲存結構（settings 內的 per-station 字串、上限 255 字）
+#   - GET 任何來源都可讀（遠端備註本來就是公開資訊）
+#   - PUT 沿用 _is_local_request() 鎖（與 /api/settings POST 一致）
+#   - 寫入後 emit SocketIO `note_box_updated` 事件給所有連線，
+#     讓多瀏覽器即時同步該工位的備註（不依賴整包 /api/settings 重抓）
+@app.route("/api/note_box/<station>", methods=["GET"])
+def api_get_note_box(station: str):
+    """讀取單一工位的備註欄。
+
+    Response:
+        {
+            "ok":      true,
+            "station": "工位5",
+            "note":    "string（最多 255 字，未設定時為空字串）"
+        }
+    """
+    if station not in STATIONS:
+        return jsonify({"ok": False, "error": "unknown station"}), 404
+    s = load_settings()
+    notes = s.get("notes") or {}
+    note = notes.get(station)
+    if not isinstance(note, str):
+        note = ""
+    return jsonify({"ok": True, "station": station, "note": note[:255]})
+
+
+@app.route("/api/note_box/<station>", methods=["PUT"])
+def api_set_note_box(station: str):
+    """寫入單一工位的備註欄（255 字上限，空字串視為清空）。
+
+    Request body:
+        {"note": "string（最多 255 字）"}
+
+    Response:
+        {"ok": true, "station": "工位5", "note": "已截斷後的字串"}
+
+    權限：與 POST /api/settings 一致，只有 OTA 本機可寫，遠端回 403。
+    副作用：
+      - 寫入 SQLite（透過既有 save_settings，跟 /api/settings POST 同一條路）
+      - 同步 dump 到 config/settings.json
+      - emit `note_box_updated` 給所有 SocketIO client，payload 為
+        {station, note}，讓遠端瀏覽器即時更新 #noteBox
+    """
+    if not _is_local_request():
+        return jsonify({
+            "ok": False,
+            "error": "readonly",
+            "message": "備註欄變更權限僅限 OTA 本機瀏覽器，遠端只能讀取。"
+        }), 403
+    if station not in STATIONS:
+        return jsonify({"ok": False, "error": "unknown station"}), 404
+    body = request.get_json(silent=True)
+    # 注意：不能用 `body or {}` 覆寫，否則 list `[]` / 空字串都會被當成 dict。
+    # 必須在補預設值前先嚴格判斷型別。
+    if body is None:
+        body = {}
+    if not isinstance(body, dict):
+        return jsonify({"ok": False, "error": "body 須為 JSON 物件"}), 400
+    # 接受 `note` 或 `notes[station]` 兩種 body 形狀，後者相容整包 PATCH 流程
+    if "note" in body:
+        raw = body["note"]
+    else:
+        raw = (body.get("notes") or {}).get(station)
+    if raw is None:
+        raw = ""
+    if not isinstance(raw, str):
+        return jsonify({"ok": False, "error": "note 須為字串"}), 400
+    truncated = raw[:255]  # 跟 load_settings / save_settings 一致的截斷
+    save_settings({"notes": {station: truncated}})
+    # 廣播給所有 client（多瀏覽器即時同步；遠端唯讀瀏覽器收到只更新顯示，不會送回 server）
+    try:
+        socketio.emit("note_box_updated", {"station": station, "note": truncated})
+    except Exception as e:
+        log.warning("note_box_updated emit 失敗: %s", e)
+    return jsonify({"ok": True, "station": station, "note": truncated})
+
+
 @app.route("/api/history/<station>")
 def api_history(station: str):
     """
