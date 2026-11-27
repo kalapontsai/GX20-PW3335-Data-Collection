@@ -1,35 +1,30 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# deploy_ssh.sh — GX20-PW3335 SSH 部署與 Nuitka 編譯管理腳本（WSL 端執行）
+# deploy_ssh.sh — GX20-PW3335 SSH 遠端維運與發布腳本（WSL 端執行）
+#
+# 部署端（10.35.31.10 / gx20）僅維護執行目錄 D:\sampo\GX20-dist，不保留原始碼或編譯環境。
 #
 # 用法：
-#   ./deploy_ssh.sh check              驗證 SSH 通道、編譯與上線目錄環境
-#   ./deploy_ssh.sh sync               透過 SSH 同步程式碼與靜態資源到 gx20:D:\sampo\GX20
-#   ./deploy_ssh.sh build              在遠端執行 Nuitka --standalone 編譯到 D:\sampo\GX20\dist
-#   ./deploy_ssh.sh publish            將 D:\sampo\GX20\dist\* 同步到上線目錄 D:\sampo\GX20-dist（保留 config/data/logs）
-#   ./deploy_ssh.sh deploy [--restart] 同步 + 編譯 + 發布到 D:\sampo\GX20-dist（若原在運行中或加 --restart 會自動重啟）
-#   ./deploy_ssh.sh start              背景啟動 D:\sampo\GX20-dist\gx20_monitor.exe
-#   ./deploy_ssh.sh stop               僅停止 D:\sampo\GX20-dist\gx20_monitor.exe
-#   ./deploy_ssh.sh restart            停止後重新啟動 D:\sampo\GX20-dist\gx20_monitor.exe
-#   ./deploy_ssh.sh status             查看執行狀態、Port 5000 與最近 log
-#   ./deploy_ssh.sh logs [N]           查看遠端 logs\app.log 最後 N 行（預設 50）
+#   ./deploy_ssh.sh check                       驗證 SSH 通道與遠端執行目錄狀態
+#   ./deploy_ssh.sh publish <dist_dir> [--restart]
+#                                               將本地已編譯的 Nuitka standalone 目錄發布至 D:\sampo\GX20-dist
+#                                               （保留遠端 config/、data/、logs/）
+#   ./deploy_ssh.sh backup [local_dir]          備份遠端 data/ 與 config/ 至 WSL（預設 ~/backups/gx20_<ts>）
+#   ./deploy_ssh.sh start                       背景啟動 D:\sampo\GX20-dist\gx20_monitor.exe
+#   ./deploy_ssh.sh stop                        停止 D:\sampo\GX20-dist\gx20_monitor.exe
+#   ./deploy_ssh.sh restart                     重啟 D:\sampo\GX20-dist\gx20_monitor.exe
+#   ./deploy_ssh.sh status                      查看執行狀態、Port 5000 與最近 log
+#   ./deploy_ssh.sh logs [N]                    查看遠端 logs\app.log 最後 N 行（預設 50）
 #
 # 環境變數覆寫：
 #   GX20_SSH_HOST    預設 gx20
-#   GX20_REMOTE_DIR  預設 D:\sampo\GX20（原始碼與 Nuitka 編譯工作區）
-#   GX20_RUNTIME_DIR 預設 D:\sampo\GX20-dist（實際執行與 data/config/logs 目錄）
-#   GX20_REMOTE_PY   預設 D:\sampo\GX20\.python\cpython-3.13.18-windows-x86_64-none\python.exe
+#   GX20_RUNTIME_DIR 預設 D:\sampo\GX20-dist
 # ==============================================================================
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SSH_HOST="${GX20_SSH_HOST:-gx20}"
-REMOTE_DIR_WIN="${GX20_REMOTE_DIR:-D:\\sampo\\GX20}"
-REMOTE_DIR_POSIX="${REMOTE_DIR_WIN//\\//}"
 RUNTIME_DIR_WIN="${GX20_RUNTIME_DIR:-D:\\sampo\\GX20-dist}"
-REMOTE_PY="${GX20_REMOTE_PY:-${REMOTE_DIR_WIN}\\.python\\cpython-3.13.18-windows-x86_64-none\\python.exe}"
 EXE_NAME="gx20_monitor.exe"
-BUILD_EXE_WIN="${REMOTE_DIR_WIN}\\dist\\${EXE_NAME}"
 EXE_PATH_WIN="${RUNTIME_DIR_WIN}\\${EXE_NAME}"
 
 SSH_OPTS=(
@@ -47,174 +42,62 @@ run_ssh_ps() {
 }
 
 cmd_check() {
-    echo "==> [check] 驗證 SSH 通道 (${SSH_HOST} -> 編譯區 ${REMOTE_DIR_WIN} / 上線區 ${RUNTIME_DIR_WIN})..."
+    echo "==> [check] 驗證 SSH 通道 (${SSH_HOST} -> ${RUNTIME_DIR_WIN})..."
     run_ssh_ps "
         \$ErrorActionPreference = 'Continue'
         Write-Host ('Host: ' + \$env:COMPUTERNAME + ' User: ' + \$env:USERNAME)
-        if (-not (Test-Path '${REMOTE_DIR_WIN}')) {
-            Write-Error '找不到編譯工作目錄: ${REMOTE_DIR_WIN}'; exit 1
+        if (-not (Test-Path '${RUNTIME_DIR_WIN}')) {
+            Write-Error '找不到遠端執行目錄: ${RUNTIME_DIR_WIN}'; exit 1
         }
-        Write-Host 'Build dir OK: ${REMOTE_DIR_WIN}'
-        if (Test-Path '${RUNTIME_DIR_WIN}') {
-            Write-Host 'Runtime dir OK: ${RUNTIME_DIR_WIN}'
-        } else {
-            Write-Host 'Runtime dir: 尚未建立（publish 時會自動建立 ${RUNTIME_DIR_WIN}）'
-        }
-        if (-not (Test-Path '${REMOTE_PY}')) {
-            Write-Error '找不到 Python: ${REMOTE_PY}'; exit 1
-        }
-        & '${REMOTE_PY}' --version
-        \$venvPy = '${REMOTE_DIR_WIN}\\.venv_build\\Scripts\\python.exe'
-        if (Test-Path \$venvPy) {
-            \$nuitkaOut = cmd /c \"\"\"\$venvPy\"\" -m nuitka --version 2>&1\"
-            if (\$LASTEXITCODE -eq 0) {
-                Write-Host ('Nuitka (venv): ' + (\$nuitkaOut | Select-Object -First 1))
-            } else {
-                Write-Host 'Nuitka: 尚未安裝於 .venv_build（build 時會自動安裝）'
-            }
-        } else {
-            Write-Host 'Build venv: 尚未建立（build 時會自動建立 ${REMOTE_DIR_WIN}\\.venv_build）'
-        }
-        if (Test-Path '${BUILD_EXE_WIN}') {
-            Write-Host 'Build output OK: ${BUILD_EXE_WIN}'
-        } else {
-            Write-Host 'Build output: 尚未編譯'
-        }
+        Write-Host 'Runtime dir OK: ${RUNTIME_DIR_WIN}'
         if (Test-Path '${EXE_PATH_WIN}') {
-            Write-Host 'Runtime executable OK: ${EXE_PATH_WIN}'
+            Write-Host 'Executable OK: ${EXE_PATH_WIN}'
         } else {
-            Write-Host 'Runtime executable: 尚未發布'
+            Write-Error '找不到執行檔: ${EXE_PATH_WIN}'; exit 1
         }
-    "
-}
-
-cmd_sync() {
-    echo "==> [sync] 同步程式碼到 ${SSH_HOST}:${REMOTE_DIR_WIN}（保留遠端 data/、config/settings.json、logs/）..."
-    cd "$SCRIPT_DIR"
-
-    # 確保遠端目錄存在，並清除目標目錄內遺留的 OTA 檔案（不碰 data/ 與 settings.json）
-    run_ssh_ps "
-        \$ErrorActionPreference = 'Stop'
-        New-Item -ItemType Directory -Force -Path '${REMOTE_DIR_WIN}', '${REMOTE_DIR_WIN}\\config', '${REMOTE_DIR_WIN}\\data', '${REMOTE_DIR_WIN}\\logs' | Out-Null
-        \$legacy = @(
-            'ota.py', 'ota_push.py', 'ota_watchdog.bat',
-            'start_forever.bat', 'restart_clean.bat', 'setup_autostart.ps1',
-            'config\\ota_token'
-        )
-        foreach (\$rel in \$legacy) {
-            \$p = Join-Path '${REMOTE_DIR_WIN}' \$rel
-            if (Test-Path \$p) {
-                Remove-Item -Force \$p
-                Write-Host ('Removed legacy OTA file: ' + \$rel)
-            }
+        \$task = Get-ScheduledTask -TaskName 'GX20_monitor' -ErrorAction SilentlyContinue
+        if (\$task) {
+            Write-Host ('ScheduledTask GX20_monitor: ' + \$task.State + ' -> ' + \$task.Actions[0].Execute)
+        } else {
+            Write-Host 'ScheduledTask GX20_monitor: 未建立'
         }
-        \$backupDir = Join-Path '${REMOTE_DIR_WIN}' 'config\\ota_backup'
-        if (Test-Path \$backupDir) {
-            Remove-Item -Recurse -Force \$backupDir
-            Write-Host 'Removed legacy dir: config\\ota_backup'
-        }
-    "
-
-    # 以 tar + gzip 串流傳輸，僅同步執行與編譯所需檔案
-    tar -czf - \
-        --exclude='__pycache__' \
-        --exclude='*.pyc' \
-        app.py \
-        config.py \
-        gx20_reader.py \
-        lttb.py \
-        paths.py \
-        pw3335_reader.py \
-        requirements.txt \
-        run.py \
-        storage.py \
-        whitelist.py \
-        static \
-        templates \
-        config/settings.example.json \
-        | ssh "${SSH_OPTS[@]}" "$SSH_HOST" "tar -xzf - -C ${REMOTE_DIR_POSIX}"
-
-    echo "==> [sync] 同步完成。"
-}
-
-cmd_build() {
-    echo "==> [build] 在 ${SSH_HOST} 執行 Nuitka --standalone 編譯..."
-    run_ssh_ps "
-        \$ErrorActionPreference = 'Continue'
-        Set-Location '${REMOTE_DIR_WIN}'
-
-        \$venvPy = '${REMOTE_DIR_WIN}\\.venv_build\\Scripts\\python.exe'
-        \$pyvenvCfg = '${REMOTE_DIR_WIN}\\.venv_build\\pyvenv.cfg'
-        \$needNewVenv = -not (Test-Path \$venvPy)
-        if (-not \$needNewVenv -and (Test-Path \$pyvenvCfg)) {
-            \$cfgText = Get-Content \$pyvenvCfg -Raw
-            \$expectedHome = Split-Path '${REMOTE_PY}' -Parent
-            if (\$cfgText -notlike \"*\$expectedHome*\") {
-                Write-Host '偵測到 .venv_build 基底 Python 變更，重建中...'
-                Remove-Item -Recurse -Force '${REMOTE_DIR_WIN}\\.venv_build'
-                \$needNewVenv = \$true
-            }
-        }
-        if (\$needNewVenv) {
-            Write-Host '建立獨立編譯環境 .venv_build...'
-            & '${REMOTE_PY}' -m venv .venv_build
-            if (\$LASTEXITCODE -ne 0) { Write-Error '建立 .venv_build 失敗'; exit 1 }
-        }
-
-        # 確認必要執行期套件與 Nuitka 存在
-        & \$venvPy -m pip install --upgrade pip --quiet
-        & \$venvPy -m pip install -r requirements.txt --quiet
-        if (\$LASTEXITCODE -ne 0) { Write-Error 'pip install -r requirements.txt 失敗'; exit 1 }
-
-        & \$venvPy -m nuitka --version *> \$null
-        if (\$LASTEXITCODE -ne 0) {
-            Write-Host '安裝 nuitka、ordered-set、zstandard...'
-            & \$venvPy -m pip install --upgrade nuitka ordered-set zstandard
-            if (\$LASTEXITCODE -ne 0) { Write-Error 'pip install nuitka 失敗'; exit 1 }
-        }
-
-        # 清理舊暫存編譯目錄
-        if (Test-Path 'build\\run.dist') { Remove-Item -Recurse -Force 'build\\run.dist' }
-        if (Test-Path 'build\\run.build') { Remove-Item -Recurse -Force 'build\\run.build' }
-
-        Write-Host '開始 Nuitka 編譯...'
-        & \$venvPy -m nuitka \`
-            --standalone \`
-            --assume-yes-for-downloads \`
-            --windows-console-mode=disable \`
-            --output-dir=build \`
-            --output-filename=${EXE_NAME} \`
-            --include-data-dir=static=static \`
-            --include-data-dir=templates=templates \`
-            --include-module=engineio.async_drivers.threading \`
-            --include-module=simple_websocket \`
-            --remove-output \`
-            run.py
-
-        if (\$LASTEXITCODE -ne 0) { Write-Error 'Nuitka 編譯失敗'; exit 1 }
-        if (-not (Test-Path 'build\\run.dist\\${EXE_NAME}')) {
-            Write-Error '找不到編譯輸出: build\\run.dist\\${EXE_NAME}'; exit 1
-        }
-
-        # 替換編譯區 dist/（先確認 build\run.dist 存在）
-        if (Test-Path 'dist_old') { Remove-Item -Recurse -Force 'dist_old' }
-        if (Test-Path 'dist') { Rename-Item -Path 'dist' -NewName 'dist_old' }
-        Move-Item -Path 'build\\run.dist' -Destination 'dist'
-        if (Test-Path 'dist_old') { Remove-Item -Recurse -Force 'dist_old' }
-
-        Write-Host '✅ Nuitka 編譯完成: ${BUILD_EXE_WIN}'
     "
 }
 
 cmd_publish() {
-    local force_restart="${1:-false}"
-    echo "==> [publish] 發布 ${REMOTE_DIR_WIN}\\dist 到 ${RUNTIME_DIR_WIN}（保留 config/、data/、logs/）..."
+    local local_dist="${1:-}"
+    local force_restart="false"
+    if [[ -z "$local_dist" || ! -d "$local_dist" ]]; then
+        echo "ERROR: 請指定本地已編譯的 Nuitka standalone 目錄，例如：./deploy_ssh.sh publish ./dist" >&2
+        exit 2
+    fi
+    if [[ ! -f "${local_dist}/${EXE_NAME}" ]]; then
+        echo "ERROR: 在 ${local_dist} 找不到 ${EXE_NAME}" >&2
+        exit 2
+    fi
+    if [[ "${2:-}" == "--restart" ]]; then
+        force_restart="true"
+    fi
+
+    echo "==> [publish] 上傳 ${local_dist} 至 ${SSH_HOST}:${RUNTIME_DIR_WIN}（保留 config/、data/、logs/）..."
+    local stage_name
+    stage_name="gx20_stage_$(date +%Y%m%d_%H%M%S)"
+
     run_ssh_ps "
         \$ErrorActionPreference = 'Stop'
-        \$buildDist = '${REMOTE_DIR_WIN}\\dist'
+        \$stage = Join-Path \$env:TEMP '${stage_name}'
+        New-Item -ItemType Directory -Force -Path \$stage | Out-Null
+    "
+
+    tar -czf - -C "$local_dist" . \
+        | ssh "${SSH_OPTS[@]}" "$SSH_HOST" "tar -xzf - -C %TEMP%/${stage_name}"
+
+    run_ssh_ps "
+        \$ErrorActionPreference = 'Stop'
         \$runtimeDir = '${RUNTIME_DIR_WIN}'
-        if (-not (Test-Path '${BUILD_EXE_WIN}')) {
-            throw '找不到編譯輸出: ${BUILD_EXE_WIN}，請先執行 build'
+        \$stage = Join-Path \$env:TEMP '${stage_name}'
+        if (-not (Test-Path (Join-Path \$stage '${EXE_NAME}'))) {
+            throw '上傳後在暫存區找不到 ${EXE_NAME}'
         }
 
         New-Item -ItemType Directory -Force -Path \$runtimeDir, \"\$runtimeDir\\config\", \"\$runtimeDir\\data\", \"\$runtimeDir\\logs\" | Out-Null
@@ -228,13 +111,21 @@ cmd_publish() {
             Start-Sleep -Seconds 2
         }
 
-        # 清除舊版編譯檔案，保留 config / data / logs
-        Get-ChildItem \$runtimeDir -Force | Where-Object {
-            \$_.Name -notin @('config', 'data', 'logs')
-        } | Remove-Item -Recurse -Force
+        try {
+            # 清除舊版編譯檔案，保留 config / data / logs
+            Get-ChildItem \$runtimeDir -Force | Where-Object {
+                \$_.Name -notin @('config', 'data', 'logs')
+            } | Remove-Item -Recurse -Force
 
-        Copy-Item -Path \"\$buildDist\\*\" -Destination \$runtimeDir -Recurse -Force
-        Write-Host '✅ 已同步最新編譯檔至 ${RUNTIME_DIR_WIN}'
+            Get-ChildItem \$stage -Force | Where-Object {
+                \$_.Name -notin @('config', 'data', 'logs')
+            } | ForEach-Object {
+                Copy-Item -Path \$_.FullName -Destination \$runtimeDir -Recurse -Force
+            }
+            Write-Host '✅ 已發布最新編譯檔至 ${RUNTIME_DIR_WIN}'
+        } finally {
+            Remove-Item -Recurse -Force \$stage -ErrorAction SilentlyContinue
+        }
 
         if (\$wasRunning -or '${force_restart}' -eq 'true') {
             Start-Process -FilePath '${EXE_PATH_WIN}' -WorkingDirectory \$runtimeDir -WindowStyle Hidden
@@ -244,10 +135,52 @@ cmd_publish() {
                 throw '啟動後進程未存活，請檢查 ${RUNTIME_DIR_WIN}\\logs\\app.log'
             }
             Write-Host ('✅ 已啟動 ${EXE_PATH_WIN} (PID: ' + (\$started.Id -join ', ') + ')')
-        } else {
-            Write-Host '（原未執行且未指定 --restart，暫不自動啟動）'
         }
     "
+}
+
+cmd_backup() {
+    local ts
+    ts="$(date +%Y%m%d_%H%M%S)"
+    local dest="${1:-$HOME/backups/gx20_${ts}}"
+    mkdir -p "$dest"
+
+    echo "==> [backup] 備份 ${SSH_HOST}:${RUNTIME_DIR_WIN} 的 data/ 與 config/ 至 ${dest}..."
+    local remote_tmp
+    remote_tmp=$(run_ssh_ps "
+        \$ErrorActionPreference = 'Stop'
+        \$src = '${RUNTIME_DIR_WIN}'
+        \$tmp = Join-Path \$env:TEMP ('gx20_bak_' + (Get-Date -Format 'yyyyMMdd_HHmmss'))
+        New-Item -ItemType Directory -Force -Path (Join-Path \$tmp 'data\\archive'), (Join-Path \$tmp 'config') | Out-Null
+
+        \$py = 'C:\\Users\\USER\\AppData\\Local\\Programs\\Python\\Python313\\python.exe'
+        if (Test-Path \$py) {
+            \$pySrc = 'import os, sqlite3, sys; s, d = sys.argv[1], sys.argv[2]; [sqlite3.connect(os.path.join(s, f)).backup(sqlite3.connect(os.path.join(d, f))) for f in os.listdir(s) if f.endswith(\".db\")]'
+            \$pyB64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(\$pySrc))
+            & \$py -c \"import base64, sys; exec(base64.b64decode(sys.argv.pop(1)).decode('utf-8'))\" \$pyB64 (Join-Path \$src 'data') (Join-Path \$tmp 'data')
+            if (\$LASTEXITCODE -ne 0) { throw 'sqlite3 線上備份失敗' }
+        } else {
+            Copy-Item (Join-Path \$src 'data\\*.db*') (Join-Path \$tmp 'data') -Force -ErrorAction SilentlyContinue
+        }
+        if (Test-Path (Join-Path \$src 'data\\archive')) {
+            Copy-Item (Join-Path \$src 'data\\archive\\*') (Join-Path \$tmp 'data\\archive') -Recurse -Force -ErrorAction SilentlyContinue
+        }
+        if (Test-Path (Join-Path \$src 'config')) {
+            Copy-Item (Join-Path \$src 'config\\*') (Join-Path \$tmp 'config') -Recurse -Force -ErrorAction SilentlyContinue
+        }
+        \$tarPath = Join-Path \$tmp 'backup.tar.gz'
+        tar -czf \$tarPath -C \$tmp data config
+        Write-Output \$tarPath
+    " | tr -d '\r' | tail -n 1)
+
+    local remote_tmp_posix="${remote_tmp//\\//}"
+    scp "${SSH_OPTS[@]}" "${SSH_HOST}:${remote_tmp_posix}" "${dest}/backup.tar.gz"
+    tar -xzf "${dest}/backup.tar.gz" -C "$dest"
+    rm -f "${dest}/backup.tar.gz"
+
+    run_ssh_ps "Remove-Item -Recurse -Force (Split-Path '${remote_tmp}' -Parent) -ErrorAction SilentlyContinue"
+    echo "✅ 備份完成: ${dest}"
+    ls -lh "${dest}/config" "${dest}/data"
 }
 
 cmd_stop() {
@@ -269,7 +202,7 @@ cmd_start() {
     run_ssh_ps "
         \$ErrorActionPreference = 'Stop'
         if (-not (Test-Path '${EXE_PATH_WIN}')) {
-            throw '找不到 ${EXE_PATH_WIN}，請先執行 build 與 publish'
+            throw '找不到 ${EXE_PATH_WIN}'
         }
         \$existing = Get-Process -ErrorAction SilentlyContinue | Where-Object { \$_.Path -eq '${EXE_PATH_WIN}' }
         if (\$existing) {
@@ -325,27 +258,15 @@ cmd_logs() {
     "
 }
 
-cmd_deploy() {
-    local force_restart="false"
-    if [[ "${1:-}" == "--restart" ]]; then
-        force_restart="true"
-    fi
-    cmd_sync
-    cmd_build
-    cmd_publish "$force_restart"
-}
-
 usage() {
-    sed -n '3,19p' "$0" | sed 's/^# \?//'
+    sed -n '3,21p' "$0" | sed 's/^# \?//'
     exit 1
 }
 
 case "${1:-}" in
     check)   cmd_check ;;
-    sync)    cmd_sync ;;
-    build)   cmd_build ;;
-    publish) cmd_publish "${2:-false}" ;;
-    deploy)  cmd_deploy "${2:-}" ;;
+    publish) cmd_publish "${2:-}" "${3:-}" ;;
+    backup)  cmd_backup "${2:-}" ;;
     start)   cmd_start ;;
     stop)    cmd_stop ;;
     restart) cmd_restart ;;

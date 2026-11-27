@@ -974,15 +974,16 @@ python run.py
 
 ### 正式環境（SSH + Nuitka `--standalone`）
 
-從開發端 WSL 直接透過 [deploy_ssh.sh](deploy_ssh.sh) 同步、編譯並更新遠端 `gx20`：
+部署端（`10.35.31.10` / `gx20`）僅維護執行目錄 `D:\sampo\GX20-dist`，透過 [deploy_ssh.sh](deploy_ssh.sh) 經 SSH 進行維運與發布：
 
 ```bash
-./deploy_ssh.sh check             # 驗證 SSH 通道與遠端環境
-./deploy_ssh.sh deploy --restart  # 同步到 D:\sampo\GX20 → Nuitka 編譯 → 發布至 D:\sampo\GX20-dist 並重啟
-./deploy_ssh.sh status            # 查看進程、Port 5000 與 logs\app.log
+./deploy_ssh.sh check                    # 驗證 SSH 通道與執行目錄
+./deploy_ssh.sh backup                   # 備份遠端 data/ 與 config/ 至 WSL
+./deploy_ssh.sh publish ./dist --restart # 發布編譯成品至 D:\sampo\GX20-dist（保留 data/config/logs）
+./deploy_ssh.sh status                   # 查看進程、Port 5000 與 logs\app.log
 ```
 
-詳細流程與 Windows 工作排程器設定見 [docs/DEPLOY_SSH_NUITKA.md](docs/DEPLOY_SSH_NUITKA.md)。
+詳細流程與 Nuitka 打包 / Windows 工作排程器設定見 [docs/DEPLOY_SSH_NUITKA.md](docs/DEPLOY_SSH_NUITKA.md)。
 
 ### 關閉
 
@@ -1076,26 +1077,23 @@ https://skemman.is/handle/1946/15343
 
 | 角色 | 主機 / 目錄 | 用途說明 |
 |------|-------------|----------|
-| 開發端（WSL） | 本機 repo（`deploy_ssh.sh`） | 修改程式碼後透過 SSH 同步、觸發遠端編譯與服務管理 |
-| 編譯工作區（遠端） | `gx20:D:\sampo\GX20` | 接收同步原始碼，使用獨立 Python（`.python`）與 `.venv_build` 執行 Nuitka `--standalone` 編譯至 `dist\` |
-| 上線執行區（遠端） | `gx20:D:\sampo\GX20-dist` | 實際執行 `gx20_monitor.exe`，並保存執行期 `data\`、`config\settings.json`、`logs\` |
+| 開發端（WSL） | 本機 repo（`deploy_ssh.sh`） | 透過 SSH 備份遠端資料、發布已編譯成品及管理服務 |
+| 上線執行區（遠端） | `gx20:D:\sampo\GX20-dist` | 僅保留 Nuitka standalone 執行檔 `gx20_monitor.exe` 與執行期 `data\`、`config\settings.json`、`logs\`（不留原始碼或編譯環境） |
 
 ### 18.2 路徑解析設計（`paths.py`）
 
 - **開發模式**（`python run.py`）：`get_bundle_dir()` 與 `get_app_root()` 皆指向專案根目錄。
-- **Nuitka standalone 模式**（`gx20_monitor.exe`）：
+- **Nuitka standalone 模式**（`D:\sampo\GX20-dist\gx20_monitor.exe`）：
   - `static/` 與 `templates/` 從執行檔所在目錄（`get_bundle_dir()`）讀取，確保前端資源與編譯後端版本一致。
-  - `data/`、`config/`、`logs/` 透過 `get_app_root()` 定位（若執行檔位於名為 `dist` 的子目錄則指向其上一層；位於 `D:\sampo\GX20-dist\` 時直接讀寫同層目錄；亦可用 `GX20_ROOT` 環境變數指定）。
+  - `data/`、`config/`、`logs/` 透過 `get_app_root()` 定位（位於 `D:\sampo\GX20-dist\` 時直接讀寫同層目錄；若位於名為 `dist` 的子目錄則指向其上一層；亦可用 `GX20_ROOT` 環境變數指定）。
 - **埠號設定**：預設綁定 `0.0.0.0:5000`（可透過 `GX20_WEB_PORT` 環境變數覆寫，方便隔離驗證）。
 
 ### 18.3 常用指令
 
 ```bash
-./deploy_ssh.sh check             # 驗證 SSH 通道、編譯區與上線區狀態
-./deploy_ssh.sh sync              # 僅同步程式碼與靜態資源到 D:\sampo\GX20
-./deploy_ssh.sh build             # 遠端執行 Nuitka --standalone 編譯到 D:\sampo\GX20\dist
-./deploy_ssh.sh publish           # 發布 D:\sampo\GX20\dist\* 至 D:\sampo\GX20-dist（保留 data/config/logs）
-./deploy_ssh.sh deploy [--restart]# 一次完成 sync + build + publish
+./deploy_ssh.sh check                    # 驗證 SSH 通道、執行目錄與排程狀態
+./deploy_ssh.sh backup                   # 備份遠端 data/ 與 config/ 至 WSL
+./deploy_ssh.sh publish ./dist --restart # 發布預先編譯成品至 D:\sampo\GX20-dist（保留 data/config/logs）
 ./deploy_ssh.sh start|stop|restart|status|logs
 ```
 
