@@ -52,6 +52,7 @@ import logging
 import logging.handlers
 import os
 import signal
+import sys
 import threading
 import time
 from collections import deque
@@ -67,6 +68,10 @@ import storage
 from gx20_reader import GX20, STATIONS, POINTS_PER_STATION, CHANNEL_NUMBER
 from pw3335_reader import fetch_one_station, DEFAULT_PW3335_PORT  # v7
 from lttb import downsample_rows
+from paths import get_app_root, get_bundle_dir
+
+APP_ROOT = get_app_root()
+BUNDLE_DIR = get_bundle_dir()
 
 # === Debug logger（v3 新增）===
 # 將所有重要事件寫到 logs/app.log：
@@ -83,7 +88,7 @@ from lttb import downsample_rows
 #   enabled=False →  INFO（預設，只記重要事件）
 # 等級改變後會立即生效（FileHandler 與 Logger 的 level 都會跟著改）
 
-LOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
+LOG_DIR = os.path.join(APP_ROOT, "logs")
 os.makedirs(LOG_DIR, exist_ok=True)
 LOG_PATH = os.path.join(LOG_DIR, "app.log")
 
@@ -91,7 +96,7 @@ LOG_PATH = os.path.join(LOG_DIR, "app.log")
 # 使用者按「保存」時，除了寫 SQLite 外，順手把整包設定 dump 進
 # config/settings.json。下次重啟時若檔案存在，優先採用檔案內容並寫回 SQLite
 # （以免 DB 預設值被誤重設）。
-SETTINGS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config")
+SETTINGS_DIR = os.path.join(APP_ROOT, "config")
 SETTINGS_JSON_PATH = os.path.join(SETTINGS_DIR, "settings.json")
 
 # 共用格式：時間 等級 logger名 訊息
@@ -124,7 +129,8 @@ def _setup_logging(debug_enabled: bool) -> None:
     for h in list(root.handlers):
         root.removeHandler(h)
     root.addHandler(_build_file_handler())
-    root.addHandler(_build_stream_handler())
+    if sys.stderr is not None:
+        root.addHandler(_build_stream_handler())
     root.setLevel(logging.DEBUG if debug_enabled else logging.INFO)
 
     # Werkzeug 預設 INFO；debug 模式時降到 DEBUG
@@ -157,7 +163,11 @@ log = logging.getLogger("app")
 log.debug("logger 模組載入完成（尚未決定等級）")
 
 # === Flask / SocketIO 初始化 ===
-app = Flask(__name__, static_folder="static", template_folder="templates")
+app = Flask(
+    __name__,
+    static_folder=os.path.join(BUNDLE_DIR, "static"),
+    template_folder=os.path.join(BUNDLE_DIR, "templates"),
+)
 # SECRET_KEY 從環境變數讀取；本機開發可放在 config/.env 或環境裡
 app.config["SECRET_KEY"] = os.environ.get("FLASK_SECRET_KEY", "gx20-web-monitor-dev-only")
 # CORS 白名單：v10.3+ 從 config/settings.json 的 whitelist 區塊讀取
@@ -368,8 +378,7 @@ def load_settings() -> dict:
             merged_pw_axis[st] = cur
         out["pw_axis"] = merged_pw_axis
 
-    # v10.3.x：whitelist = {cors_origins, ota_admin_ips, remote_write_ips,
-    #                       ota_allowed_targets, ota_blocked_exts}
+    # whitelist = {cors_origins, remote_write_ips}
     # 單一真相來源：whitelist.py:DEFAULTS（不再放 config.default_settings()，
     # 避免兩邊 default 漂移）。
     # SQLite 內存的是整包 JSON；缺漏子 key 用 _wl.DEFAULTS 補，
@@ -478,11 +487,10 @@ def save_settings(patch: dict) -> None:
                     existing[st] = val[:255]  # 與 load_settings 一致的截斷
             storage.set_setting("notes", config.to_json(existing))
         elif k == "whitelist":
-            # v10.3.x：whitelist = {cors_origins, ota_admin_ips, remote_write_ips,
-            #                       ota_allowed_targets, ota_blocked_exts}
+            # whitelist = {cors_origins, remote_write_ips}
             # 整包存成一個 SQLite row（key="whitelist"，value=JSON），
-            # 但 5 個子 key 採 per-key merge：patch 只送 cors_origins 時，
-            # 其他 4 個保留（不被洗掉）。
+            # 各子 key 採 per-key merge：patch 只送 cors_origins 時，
+            # 其他子 key 保留（不被洗掉）。
             # 單一真相來源仍是 whitelist.py:DEFAULTS；load_settings 那邊會再 merge。
             #
             # v10.3.x+ B 方案：非 dict 寫入直接忽略（不寫、不覆蓋 SQLite 內原值）。
@@ -967,7 +975,7 @@ def calculator_page():
 
 
 # v8.1.2：設定變更權限鎖本機
-# 決策：只有 OTA 本機 (127.0.0.1) 可變更設定，遠端瀏覽器只能讀。
+# 決策：只有本機 (127.0.0.1) 可變更設定，遠端瀏覽器只能讀。
 # 原因：v8.1.1 migrate legacy session 會「意外覆寫 server 設定」（跨工位污染），
 #       根治就是讓遠端沒權限改，server 端是 single source of truth。
 # 判定：以 client IP 為準，只接受 127.0.0.1 (IPv4) 跟 ::1 (IPv6)。
@@ -999,7 +1007,7 @@ def api_set_settings():
         return jsonify({
             "ok": False,
             "error": "readonly",
-            "message": "設定變更權限僅限 OTA 本機瀏覽器，遠端只能讀取。"
+            "message": "設定變更權限僅限本機瀏覽器，遠端只能讀取。"
         }), 403
     patch = request.get_json(silent=True) or {}
     if not isinstance(patch, dict):
@@ -1652,136 +1660,6 @@ def api_debug_log_tail():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
-# ---------- OTA 管理 ----------
-
-import ota as _ota
-
-@app.route("/api/admin/status")
-def api_admin_status():
-    """
-    檢查 OTA 狀態。
-    公開可讀（不洩漏 token），只回 fingerprint 供使用者確認 token 已設定。
-    v8.4+：IP 白名單限制，只有 OTA 白名單 IP 可呼叫。
-    """
-    if not _ota.is_allowed_ip(request.remote_addr):
-        log.warning("api_admin/status 被擋（非白名單 IP=%s）", request.remote_addr)
-        return jsonify({"ok": False, "error": "forbidden"}), 403
-    s = _ota.status()
-    return jsonify(s)
-
-
-@app.route("/api/admin/ota", methods=["POST"])
-def api_admin_ota():
-    """
-    上傳單檔 OTA 更新。
-    Header: X-OTA-Token: <token>
-    Form:
-      - file:  檔案
-      - target: 相對於 APP_ROOT 的路徑（例: static/js/main.js）
-    v8.4+：IP 白名單限制。
-    """
-    if not _ota.is_allowed_ip(request.remote_addr):
-        log.warning("api_admin/ota 被擋（非白名單 IP=%s）", request.remote_addr)
-        return jsonify({"ok": False, "error": "forbidden"}), 403
-    if not _ota.check_token(request.headers.get("X-OTA-Token")):
-        return jsonify({"ok": False, "error": "invalid or missing token"}), 401
-    target = (request.form.get("target") or "").strip()
-    if not target:
-        return jsonify({"ok": False, "error": "missing 'target' field"}), 400
-    f = request.files.get("file")
-    if not f:
-        return jsonify({"ok": False, "error": "missing 'file'"}), 400
-    content = f.read()
-    result = _ota.save_file(target, content)
-    log.info("OTA 上傳 target=%s size=%d → %s", target, len(content), result.get("ok"))
-    status_code = 200 if result.get("ok") else 400
-    return jsonify(result), status_code
-
-
-@app.route("/api/admin/ota_bundle", methods=["POST"])
-def api_admin_ota_bundle():
-    """
-    一次推多檔 OTA 更新。
-    Header: X-OTA-Token: <token>
-    Body (JSON):
-      {
-        "files": [
-          {"target": "static/js/main.js", "content_b64": "..."},
-          {"target": "templates/index.html", "content_b64": "..."}
-        ],
-        "restart": true   // 可選，呼叫後觸發自我重啟
-      }
-    """
-    if not _ota.is_allowed_ip(request.remote_addr):
-        log.warning("api_admin/ota_bundle 被擋（非白名單 IP=%s）", request.remote_addr)
-        return jsonify({"ok": False, "error": "forbidden"}), 403
-    if not _ota.check_token(request.headers.get("X-OTA-Token")):
-        return jsonify({"ok": False, "error": "invalid or missing token"}), 401
-    body = request.get_json(silent=True) or {}
-    files = body.get("files") or []
-    if not isinstance(files, list) or not files:
-        return jsonify({"ok": False, "error": "missing 'files' list"}), 400
-    results = []
-    all_ok = True
-    import base64 as _b64
-    for entry in files:
-        target = (entry.get("target") or "").strip()
-        b64 = entry.get("content_b64") or ""
-        try:
-            content = _b64.b64decode(b64)
-        except Exception as e:
-            results.append({"target": target, "ok": False, "error": f"base64 decode: {e}"})
-            all_ok = False
-            continue
-        r = _ota.save_file(target, content)
-        results.append(r)
-        if not r.get("ok"):
-            all_ok = False
-    log.info("OTA bundle 上傳 %d 個檔案，結果: %s", len(files),
-             "ALL OK" if all_ok else "PARTIAL/FAIL")
-    response = {"ok": all_ok, "results": results, "saved_count": sum(1 for r in results if r.get("ok"))}
-    if body.get("restart") and all_ok:
-        response["restart"] = _ota.schedule_restart(delay_sec=2)
-    return jsonify(response), (200 if all_ok else 400)
-
-
-@app.route("/api/admin/restart", methods=["POST"])
-def api_admin_restart():
-    """
-    觸發自我重啟。
-    Header: X-OTA-Token: <token>
-    Body: {"delay": 2}  // 可選，預設 2 秒
-    v8.4+：IP 白名單限制。
-    """
-    if not _ota.is_allowed_ip(request.remote_addr):
-        log.warning("api_admin/restart 被擋（非白名單 IP=%s）", request.remote_addr)
-        return jsonify({"ok": False, "error": "forbidden"}), 403
-    if not _ota.check_token(request.headers.get("X-OTA-Token")):
-        return jsonify({"ok": False, "error": "invalid or missing token"}), 401
-    body = request.get_json(silent=True) or {}
-    delay = int(body.get("delay", 2))
-    delay = max(0, min(delay, 10))
-    log.warning("管理員觸發自我重啟（%d 秒後）", delay)
-    return jsonify(_ota.schedule_restart(delay_sec=delay))
-
-
-@app.route("/api/admin/clear_log", methods=["POST"])
-def api_admin_clear_log():
-    """
-    清空 logs/app.log 與備份檔（不需重啟）。
-    Header: X-OTA-Token: <token>
-    Body 可省略；保留期實作為「全清」。
-    用途：debug log 開啟前先清，避免前一波資料虛胖。
-    v8.4+：IP 白名單限制。
-    """
-    if not _ota.is_allowed_ip(request.remote_addr):
-        log.warning("api_admin/clear_log 被擋（非白名單 IP=%s）", request.remote_addr)
-        return jsonify({"ok": False, "error": "forbidden"}), 403
-    if not _ota.check_token(request.headers.get("X-OTA-Token")):
-        return jsonify({"ok": False, "error": "invalid or missing token"}), 401
-    return jsonify(_ota.clear_log_file())
-
-
 # ---------- CSV 匯出 ----------
 
 def _sanitize_csv_cell(s: str) -> str:
@@ -2081,9 +1959,10 @@ def main():
     t = threading.Thread(target=poller, name="gx20-poller", daemon=True)
     t.start()
 
-    log.info("啟動 Flask-SocketIO 0.0.0.0:5000")
+    port = int(os.environ.get("GX20_WEB_PORT", "5000"))
+    log.info("啟動 Flask-SocketIO 0.0.0.0:%d", port)
     log.info("=" * 60)
-    socketio.run(app, host="0.0.0.0", port=5000, debug=False, allow_unsafe_werkzeug=True)
+    socketio.run(app, host="0.0.0.0", port=port, debug=False, allow_unsafe_werkzeug=True)
 
 
 if __name__ == "__main__":

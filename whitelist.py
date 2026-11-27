@@ -2,7 +2,7 @@
 """
 whitelist.py
 ============
-集中管理 GX20 所有白名單（CORS / IP / OTA 寫入路徑 / 副檔名）。
+集中管理 GX20 白名單（CORS / 遠端寫入 IP）。
 
 資料來源：config/settings.json 內的 "whitelist" 區塊
 （沿用現有 settings 寫入鏈 + 本機鎖，不需新檔案）。
@@ -20,9 +20,11 @@ import os
 import threading
 import time
 
+from paths import get_app_root
+
 log = logging.getLogger("gx20.whitelist")
 
-APP_ROOT = os.path.dirname(os.path.abspath(__file__))
+APP_ROOT = get_app_root()
 SETTINGS_PATH = os.path.join(APP_ROOT, "config", "settings.json")
 
 # ---------- 預設值（檔案不存在 / 解析失敗 / 欄位缺漏時使用）----------
@@ -33,32 +35,6 @@ DEFAULTS = {
         "http://10.35.31.10:5000",
     ],
     "remote_write_ips": ["127.0.0.1", "::1"],
-    "ota_admin_ips": ["127.0.0.1", "::1", "10.35.32.11"],
-    "ota_allowed_targets": [
-        # 前端
-        "static/js/",
-        "static/css/",
-        "static/vendor/",
-        "templates/",
-        # 後端核心
-        "app.py",
-        "config.py",
-        "storage.py",
-        "gx20_reader.py",
-        "lttb.py",
-        "run.py",
-        # OTA 自己
-        "ota.py",
-        # 工具
-        "ota_push.py",
-        "ota_watchdog.py",
-        "ota_watchdog.bat",
-        "start_forever.bat",
-    ],
-    "ota_blocked_exts": [
-        ".pyc", ".pyo", ".pyd", ".so", ".dll", ".exe",
-        ".bat", ".sh", ".ps1",
-    ],
 }
 
 # 模組狀態（受 _lock 保護）
@@ -145,13 +121,9 @@ def init() -> None:
             _state["settings_mtime"] = os.path.getmtime(SETTINGS_PATH)
         _state["loaded_at"] = time.time()
     log.info(
-        "whitelist: 啟動載入完成，cors=%d 筆, remote_write=%d 筆, "
-        "ota_admin=%d 筆, targets=%d 筆, blocked_exts=%d 筆",
+        "whitelist: 啟動載入完成，cors=%d 筆, remote_write=%d 筆",
         len(_state["data"]["cors_origins"]),
         len(_state["data"]["remote_write_ips"]),
-        len(_state["data"]["ota_admin_ips"]),
-        len(_state["data"]["ota_allowed_targets"]),
-        len(_state["data"]["ota_blocked_exts"]),
     )
 
 
@@ -168,7 +140,7 @@ def get(key: str) -> list:
 
 
 def get_status() -> dict:
-    """給 /api/admin/status 看目前生效的白名單摘要（debug 用）。"""
+    """回傳目前生效的白名單摘要（debug 用）。"""
     _reload_if_changed()
     with _lock:
         return {

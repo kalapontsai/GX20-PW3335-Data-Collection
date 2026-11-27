@@ -35,13 +35,14 @@ from typing import Dict, List, Optional, Any, Iterator, Tuple
 from datetime import datetime, timedelta
 
 import config  # v10.x：讀 defaults / from_json 給 archive meta 用
+from paths import get_app_root
 
 log = logging.getLogger("storage")
 
 # 延遲載入：避免 storage.py 被 import 時 gx20_reader 還沒初始化
 _STATIONS: Optional[List[str]] = None
 
-DB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
+DB_DIR = os.path.join(get_app_root(), "data")
 ARCHIVE_DIR = os.path.join(DB_DIR, "archive")
 
 # 每工位歸檔保留份數（超過自動刪最舊）

@@ -149,7 +149,7 @@ def test_shape_1_basic_save_and_load():
 
 
 def test_shape_2_per_key_merge():
-    """shape 2：patch 只送 cors_origins → 其他 4 個子 key 不被洗掉"""
+    """shape 2：patch 只送 cors_origins → remote_write_ips 不被洗掉"""
     print("\n[shape 2] per-key merge（只送一個子 key 不洗其他）")
     with _Sandbox() as sb:
         import storage
@@ -159,10 +159,7 @@ def test_shape_2_per_key_merge():
         # 先寫一包完整的
         full = {
             "cors_origins": ["http://a.example:5000"],
-            "ota_admin_ips": ["10.0.0.1", "10.0.0.2"],
-            "remote_write_ips": ["127.0.0.1", "::1"],
-            "ota_allowed_targets": ["static/js/", "app.py"],
-            "ota_blocked_exts": [".pyc", ".exe"],
+            "remote_write_ips": ["10.0.0.1", "10.0.0.2"],
         }
         app.save_settings({"whitelist": full})
 
@@ -174,14 +171,8 @@ def test_shape_2_per_key_merge():
         wl = loaded.get("whitelist", {})
         require(wl.get("cors_origins") == new_cors,
                 f"cors_origins 應被更新為 {new_cors}，實際 {wl.get('cors_origins')}")
-        require(wl.get("ota_admin_ips") == ["10.0.0.1", "10.0.0.2"],
-                f"ota_admin_ips 應保留 [10.0.0.1, 10.0.0.2]，實際 {wl.get('ota_admin_ips')}")
-        require(wl.get("remote_write_ips") == ["127.0.0.1", "::1"],
-                f"remote_write_ips 應保留，實際 {wl.get('remote_write_ips')}")
-        require(wl.get("ota_allowed_targets") == ["static/js/", "app.py"],
-                f"ota_allowed_targets 應保留，實際 {wl.get('ota_allowed_targets')}")
-        require(wl.get("ota_blocked_exts") == [".pyc", ".exe"],
-                f"ota_blocked_exts 應保留，實際 {wl.get('ota_blocked_exts')}")
+        require(wl.get("remote_write_ips") == ["10.0.0.1", "10.0.0.2"],
+                f"remote_write_ips 應保留 [10.0.0.1, 10.0.0.2]，實際 {wl.get('remote_write_ips')}")
         return True
 
 
@@ -231,11 +222,8 @@ def test_shape_4_load_with_partial_db():
         require(isinstance(wl, dict), "whitelist 應為 dict")
         require(wl.get("cors_origins") == ["http://legacy.example:5000"],
                 f"cors_origins 應為 legacy 值，實際 {wl.get('cors_origins')}")
-        # 其他 4 個子 key 應該用 DEFAULTS 兜底
-        require("ota_admin_ips" in wl, "ota_admin_ips 應存在（DEFAULTS 兜底）")
+        # 其他子 key 應該用 DEFAULTS 兜底
         require("remote_write_ips" in wl, "remote_write_ips 應存在（DEFAULTS 兜底）")
-        require("ota_allowed_targets" in wl, "ota_allowed_targets 應存在（DEFAULTS 兜底）")
-        require("ota_blocked_exts" in wl, "ota_blocked_exts 應存在（DEFAULTS 兜底）")
         return True
 
 
@@ -249,10 +237,7 @@ def test_shape_5_dump_json_includes_whitelist():
 
         wl_in = {
             "cors_origins": ["http://x.example:5000"],
-            "ota_admin_ips": ["10.99.99.99"],
-            "remote_write_ips": ["127.0.0.1"],
-            "ota_allowed_targets": ["static/js/", "templates/"],
-            "ota_blocked_exts": [".pyc"],
+            "remote_write_ips": ["127.0.0.1", "10.99.99.99"],
         }
         app.save_settings({"whitelist": wl_in})
 

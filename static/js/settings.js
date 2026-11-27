@@ -596,17 +596,14 @@ function bindPwAxisFields() {
 }
 
 // ============================================================
-// v10.3+：安全白名單（whitelist 區塊）
-// 渲染 5 個 list 區塊；使用者按保存時隨 GX20State 一起送出。
+// 安全白名單（whitelist 區塊）
+// 渲染白名單 list 區塊；使用者按保存時隨 GX20State 一起送出。
 // 變更只在本機有效（POST /api/settings 已鎖本機）。
 // ============================================================
 
 const WHITELIST_KEYS = [
   { key: "cors_origins",         el: "wlCorsOrigins",    placeholder: "http://host:port" },
-  { key: "ota_admin_ips",        el: "wlOtaAdminIps",    placeholder: "127.0.0.1" },
   { key: "remote_write_ips",     el: "wlRemoteWriteIps", placeholder: "127.0.0.1" },
-  { key: "ota_allowed_targets",  el: "wlOtaTargets",     placeholder: "static/js/" },
-  { key: "ota_blocked_exts",     el: "wlBlockedExts",    placeholder: ".pyc" },
 ];
 
 // 預設值（跟 server whitelist.py DEFAULTS 一致；改任一邊要記得同步另一邊）
@@ -617,18 +614,6 @@ const WHITELIST_DEFAULTS = {
     "http://10.35.31.10:5000",
   ],
   remote_write_ips: ["127.0.0.1", "::1"],
-  ota_admin_ips: ["127.0.0.1", "::1", "10.35.32.11"],
-  ota_allowed_targets: [
-    "static/js/", "static/css/", "static/vendor/", "templates/",
-    "app.py", "config.py", "storage.py", "gx20_reader.py",
-    "lttb.py", "run.py", "ota.py",
-    "ota_push.py", "ota_watchdog.py", "ota_watchdog.bat",
-    "start_forever.bat",
-  ],
-  ota_blocked_exts: [
-    ".pyc", ".pyo", ".pyd", ".so", ".dll", ".exe",
-    ".bat", ".sh", ".ps1",
-  ],
 };
 
 function _wlReadSettings() {
@@ -693,7 +678,7 @@ function renderWhitelist() {
   const resetBtn = document.getElementById("wlResetBtn");
   if (resetBtn) {
     resetBtn.onclick = () => {
-      if (!confirm("重置為預設值？目前 5 個白名單都會還原到出廠狀態。")) return;
+      if (!confirm("重置為預設值？所有白名單欄位都會還原到出廠狀態。")) return;
       GX20State.update("whitelist", JSON.parse(JSON.stringify(WHITELIST_DEFAULTS)));
       renderWhitelist();
     };

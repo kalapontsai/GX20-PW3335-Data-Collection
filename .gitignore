@@ -35,11 +35,12 @@ data/archive/
 # Local config overrides（保留 settings.example.json；settings.json 含使用者實際值）
 .env
 config/settings.json
-config/ota_token
-config/ota_backup/
 
-# OTA 推送暫存 manifest（本機一次性，不進版控）
-ota_manifest_*.json
+# Nuitka 編譯產物
+*.build/
+*.dist/
+*.onefile-build/
+*.exe
 
 # 本機驗收產物（smoke test screenshots）
 screenshots/

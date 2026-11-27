@@ -4,6 +4,8 @@
 >
 > 6 工位 × 20 接點 = 120 點溫度 + 6 工位 V/I/W 三相電力，每 10 秒取樣一次，**可持續記錄 7 天以上**
 >
+> **v12.2** 改版重點：移除所有 OTA 批次檔與程式碼（`ota.py`、`ota_push.py`、`ota_watchdog.bat`、`start_forever.bat`、`restart_clean.bat`、`setup_autostart.ps1` 與 `/api/admin/*`），改用 **WSL SSH + Nuitka `--standalone`** 部署（[deploy_ssh.sh](deploy_ssh.sh) / [docs/DEPLOY_SSH_NUITKA.md](docs/DEPLOY_SSH_NUITKA.md)），並新增 `paths.py` 支援編譯執行路徑。
+>
 > **v12.1** 改版重點：新增 per-station 備註 API `/api/note_box/<station>`（GET/PUT），外部 client 不再需要拉整包 `/api/settings` 才能讀寫單一工位備註；寫入後 emit `note_box_updated` socket 事件，多瀏覽器即時同步（沿用 v8.1.2 本機可寫 / 遠端唯讀）
 >
 > **v12.0.2** 改版重點：calculator 頁 x-line 改為固定 1445 min 窗口（拖任一條或中段 highlight 都同步平移）；F/R 溫度 block 新增「抓取平均溫度」 checkbox，勾選即恢復左右各自獨立移動模式
@@ -12,7 +14,7 @@
 >
 > **v12.0** 改版重點：工位 5 `t20` 改讀 GX20 `0610` 5V 電壓，修正實機回應解析；設定頁頻道卡片新增 Volt 開關，切到 V 顯示 3 位小數
 >
-> **v10.3.1** 改版重點：5 個白名單（CORS / 內網寫入 IP / OTA 後台 IP / OTA 路徑 / 副檔名）抽離到 `config/settings.json` 的 `whitelist` 區塊，可在本機 `/settings` 頁面編輯，5 秒內熱載入生效
+> **v10.3.1** 改版重點：安全白名單（`cors_origins`、`remote_write_ips`；原 OTA 3 欄已於 v12.2 移除）抽離到 `config/settings.json` 的 `whitelist` 區塊，可在本機 `/settings` 頁面編輯，5 秒內熱載入生效
 >
 > **v10.3** 改版重點：行動簡式頁面 `/mobile`（獨立 route，不在主頁加連結，工位下拉 + 20 channel 讀值表，桌機手機同版面）
 >
@@ -61,12 +63,12 @@
 15. [執行方式](#15-執行方式)
 16. [故障排除](#16-故障排除)
 17. [已知限制](#17-已知限制)
-18. [OTA 部署通道](#18-ota-部署通道)
+18. [SSH + Nuitka 部署架構](#18-ssh--nuitka-部署架構)
 19. [現況進度（2026-06-11）](#19-現況進度2026-06-11-session)
 19b. [現況進度（2026-06-12 進階計算上線）](#19b-現況進度2026-06-12-進階計算上線)
 19c. [現況進度（2026-06-15 PW3335 電力計上線）](#19c-現況進度2026-06-15-pw3335-電力計上線)
 20. [功能改善路線圖](docs/IMPROVEMENTS.md)
-21. [部署 + OTA 手冊](docs/DEPLOY_OTA.md)
+21. [SSH + Nuitka 部署手冊](docs/DEPLOY_SSH_NUITKA.md)
 
 ---
 
@@ -298,13 +300,19 @@ data/
 ```
 gx20-web-monitor/
 ├── README.md                       本文件
-├── requirements.txt                flask + flask-socketio
-├── run.py                          啟動入口（python run.py）
+├── requirements.txt                flask + flask-socketio + simple-websocket
+├── run.py                          啟動入口（python run.py / Nuitka entry）
+├── deploy_ssh.sh                   WSL SSH 部署與遠端 Nuitka 編譯腳本
+├── paths.py                        路徑解析（相容 Python 與 Nuitka standalone）
+├── whitelist.py                    CORS 與遠端寫入白名單管理
 ├── gx20_reader.py                  GX20 TCP 通訊（移植自桌面版）
+├── pw3335_reader.py                PW3335 電力計 TCP 通訊
 ├── storage.py                      SQLite 層（v5：6 工位獨立 DB + settings DB + 歸檔）
 ├── config.py                       預設值集中管理
 ├── lttb.py                         LTTB 降取樣（後端版）
 ├── app.py                          Flask + Flask-SocketIO 主程式
+├── docs/
+│   └── DEPLOY_SSH_NUITKA.md        SSH + Nuitka 部署操作手冊
 ├── data/                           SQLite 檔（v5 佈局）
 │   ├── gx20_<station>.db           每工位一份 samples
 │   ├── gx20_settings.db            6 工位共用的 settings
@@ -868,15 +876,9 @@ data/
 | `/api/note_box/<station>` | GET | **v12.1** 讀單一工位備註（`{ok, station, note}`，備註上限 255 字） |
 | `/api/note_box/<station>` | PUT | **v12.1** 寫單一工位備註；body `{"note":"..."}`（或 `{"notes":{"<station>":"..."}}`）。**v8.1.2** 起遠端瀏覽器呼叫會被 403 擋下（本機 `127.0.0.1` / `::1` 才能寫）。寫入後 emit `note_box_updated` socket 事件 |
 
-### Admin（OTA 用，頭帶 `X-OTA-Token`）
+### 系統管理端點說明（v12.2 變更）
 
-| 路徑 | 方法 | 用途 |
-|---|---|---|
-| `/api/admin/status` | GET | OTA 狀態、token 指紋、uptime、watchdog 版本 |
-| `/api/admin/ota` | POST | 推**單檔**（multipart + `target=相對路徑`） |
-| `/api/admin/ota_bundle` | POST | 推**多檔**一次到位（JSON + base64） |
-| `/api/admin/restart` | POST | 觸發自我重啟（body `{"delay_sec":2}`） |
-| `/api/admin/clear_log` | POST | 清空 `logs/app.log` |
+- 原 OTA 相關端點（`/api/admin/status`、`/api/admin/ota`、`/api/admin/ota_bundle`、`/api/admin/restart`、`/api/admin/clear_log`）已於 v12.2 隨 `ota.py` 一併移除，所有更新與服務管理改由 `deploy_ssh.sh` 經 SSH 執行。
 
 ### SocketIO 事件
 
@@ -970,6 +972,18 @@ python run.py
 - 首次啟動會建立 `config/settings.json` 與 `data/gx20.db`
 - 之後重啟若 `config/settings.json` 存在，**自動套用**（不必按保存）
 
+### 正式環境（SSH + Nuitka `--standalone`）
+
+從開發端 WSL 直接透過 [deploy_ssh.sh](deploy_ssh.sh) 同步、編譯並更新遠端 `gx20`：
+
+```bash
+./deploy_ssh.sh check             # 驗證 SSH 通道與遠端環境
+./deploy_ssh.sh deploy --restart  # 同步到 D:\sampo\GX20 → Nuitka 編譯 → 發布至 D:\sampo\GX20-dist 並重啟
+./deploy_ssh.sh status            # 查看進程、Port 5000 與 logs\app.log
+```
+
+詳細流程與 Windows 工作排程器設定見 [docs/DEPLOY_SSH_NUITKA.md](docs/DEPLOY_SSH_NUITKA.md)。
+
 ### 關閉
 
 - `Ctrl+C` 終止
@@ -1053,294 +1067,41 @@ https://skemman.is/handle/1946/15343
 
 ---
 
-## 18. OTA 部署通道
+## 18. SSH + Nuitka 部署架構
 
-> 完整操作手冊：[docs/DEPLOY_OTA.md](docs/DEPLOY_OTA.md)
-> 本節為**機制說明**（為什麼這樣設計、各元件怎麼互動、故障怎麼排查）
+> 完整操作手冊：[docs/DEPLOY_SSH_NUITKA.md](docs/DEPLOY_SSH_NUITKA.md)
+> 自 v12.2 起已移除所有 OTA 模組與 `.bat` / `.ps1` 腳本，全面改用 **WSL SSH + Nuitka `--standalone`** 部署與維運。
 
-### 18.1 為什麼需要 OTA
+### 18.1 架構與目錄分工
 
-| 角色 | 主機 | 工作目錄 | 同步方式 |
-|------|------|----------|----------|
-| 開發端 | WSL（<DEV_HOST>） | `<DEV_PROJECT_DIR>\` | 二寶改檔的起點 |
-| 部署端 | Windows <DEPLOY_HOST> | `<DEPLOY_PATH>\` | 跑 python app.py |
-| 同步通道 | **OTA**（HTTP） | `POST /api/admin/*` 帶 `X-OTA-Token` header | 兩端都是 Windows 跑 Python，但**沒有** OneDrive 同步 |
+| 角色 | 主機 / 目錄 | 用途說明 |
+|------|-------------|----------|
+| 開發端（WSL） | 本機 repo（`deploy_ssh.sh`） | 修改程式碼後透過 SSH 同步、觸發遠端編譯與服務管理 |
+| 編譯工作區（遠端） | `gx20:D:\sampo\GX20` | 接收同步原始碼，使用獨立 Python（`.python`）與 `.venv_build` 執行 Nuitka `--standalone` 編譯至 `dist\` |
+| 上線執行區（遠端） | `gx20:D:\sampo\GX20-dist` | 實際執行 `gx20_monitor.exe`，並保存執行期 `data\`、`config\settings.json`、`logs\` |
 
-部署端是工廠機台，沒有開發環境，也不會裝 git、rsync、雲端同步。  
-OTA 通道 = **HTTP 上傳檔 + 自我重啟**，讓二寶在 WSL 端改完 → 推檔 → 部署端自動套用。
+### 18.2 路徑解析設計（`paths.py`）
 
-### 18.2 系統組成（4 隻元件）
+- **開發模式**（`python run.py`）：`get_bundle_dir()` 與 `get_app_root()` 皆指向專案根目錄。
+- **Nuitka standalone 模式**（`gx20_monitor.exe`）：
+  - `static/` 與 `templates/` 從執行檔所在目錄（`get_bundle_dir()`）讀取，確保前端資源與編譯後端版本一致。
+  - `data/`、`config/`、`logs/` 透過 `get_app_root()` 定位（若執行檔位於名為 `dist` 的子目錄則指向其上一層；位於 `D:\sampo\GX20-dist\` 時直接讀寫同層目錄；亦可用 `GX20_ROOT` 環境變數指定）。
+- **埠號設定**：預設綁定 `0.0.0.0:5000`（可透過 `GX20_WEB_PORT` 環境變數覆寫，方便隔離驗證）。
 
-```
-┌─────────────────────── 開發端 (WSL) ───────────────────────┐
-│  1. ota_push.py        CLI 推送工具（單檔 / 批次 / 重啟）   │
-└──────────────────────────┬──────────────────────────────────┘
-                           │  HTTP POST + X-OTA-Token
-                           ▼
-┌─────────────────────── 部署端 (<DEPLOY_HOST>) ────────────────┐
-│  2. app.py              Flask 主進程（掛載 4 個 admin 端點）│
-│       └── ota.py        OTA 模組（白名單、Token、原子寫入）│
-│  3. ota_watchdog.bat    Watch dog（v2 自動找 python + log）│
-│       └── python app.py  ←── Flask 子進程                  │
-│  4. start_forever.bat   背景啟動器（關視窗不殺 watch dog） │
-│                                                               │
-│  config/                                                       │
-│  ├── ota_token             32 byte 隨機 token（不入版控）     │
-│  └── ota_backup/<ts>/<f>  寫入前自動備份                      │
-└───────────────────────────────────────────────────────────────┘
-```
-
-| 元件 | 角色 | 觸發時機 |
-|------|------|----------|
-| `ota_push.py` | 開發者用的 CLI（單檔 push / 批次 bundle / 純重啟 / 查狀態） | 我改完檔之後 |
-| `ota.py` | Flask 內的 OTA 模組；註冊 4 個 admin endpoint | Flask 啟動時掛載 |
-| `ota_watchdog.bat` | 包住 `python app.py` 的批次迴圈 | 崩潰或 OTA 重啟時接手 |
-| `start_forever.bat` | 用 `start /B /MIN` 把 watch dog 開成背景 | 工廠開機 / 換人接手時 |
-
-### 18.3 4 個 Admin 端點
-
-由 `ota.py` 註冊到 Flask，全部走 `X-OTA-Token` header 認證：
-
-| 方法 | 路徑 | 用途 | 請求格式 |
-|------|------|------|----------|
-| `GET`  | `/api/admin/status`     | 查 OTA 狀態、token 指紋、uptime、watch dog 版本 | — |
-| `POST` | `/api/admin/ota`        | 推**單檔**（multipart） | `multipart/form-data` + `target=相對路徑` |
-| `POST` | `/api/admin/ota_bundle` | 推**多檔**一次到位 | JSON + base64 內文 |
-| `POST` | `/api/admin/restart`    | 觸發自我重啟 | JSON `{"delay_sec": 2}` |
-
-`ota_push.py` 把這些封裝成子命令：
+### 18.3 常用指令
 
 ```bash
-python3 ota_push.py status  http://<DEPLOY_HOST>:5000
-python3 ota_push.py push    http://<DEPLOY_HOST>:5000 ./static/js/main.js static/js/main.js --restart
-python3 ota_push.py bundle  http://<DEPLOY_HOST>:5000 ota_manifest.json
-python3 ota_push.py restart http://<DEPLOY_HOST>:5000
+./deploy_ssh.sh check             # 驗證 SSH 通道、編譯區與上線區狀態
+./deploy_ssh.sh sync              # 僅同步程式碼與靜態資源到 D:\sampo\GX20
+./deploy_ssh.sh build             # 遠端執行 Nuitka --standalone 編譯到 D:\sampo\GX20\dist
+./deploy_ssh.sh publish           # 發布 D:\sampo\GX20\dist\* 至 D:\sampo\GX20-dist（保留 data/config/logs）
+./deploy_ssh.sh deploy [--restart]# 一次完成 sync + build + publish
+./deploy_ssh.sh start|stop|restart|status|logs
 ```
 
-### 18.4 安全性（為什麼不擔心被打）
+### 18.4 開機自動啟動（Windows 工作排程器）
 
-| 風險 | 防護 | 實作位置 |
-|------|------|----------|
-| 未授權推檔 | Token 認證（恆定時間比對） | `ota.check_token()` |
-| 路徑穿越 `../` | `os.path.normpath` + 必須落在 `APP_ROOT` 內 | `ota.resolve_target()` |
-| 任意檔案覆蓋 | 寫入白名單 `ALLOWED_TARGETS` | `ota.is_allowed_target()` |
-| 上傳執行檔 | 黑名單副檔名 `.pyc/.so/.dll/.exe/.sh/.ps1` | `BLOCKED_EXTS`（白名單具名 .bat 例外） |
-| 寫到一半壞檔 | Atomic write：`.tmp` + `os.replace` | `ota.atomic_write()` |
-| 改壞了救不回 | 寫入前自動備份到 `config/ota_backup/<ts>/` | `ota._backup_existing()` |
-| Token 洩漏 | 不進版控（`.gitignore`）、只用指紋對照 | `.gitignore`、`token_fingerprint()` |
-
-**Token 來源優先序**：
-
-1. 環境變數 `GX20_OTA_TOKEN`（最高優先）
-2. `config/ota_token` 檔（部署端 Flask 第一次啟動自動產生 32 byte 隨機 token）
-3. 自動產生並寫入 `config/ota_token`
-
-`/api/admin/status` 只回 `token_fingerprint`（sha256 前 8 碼），**絕不回傳完整 token**。  
-二寶跟大大對照指紋即可確認兩端 token 一致，token 本身不透過 Telegram 明文傳。
-
-### 18.5 一次完整推送的時序
-
-以「修了一個 JS bug」為例：
-
-```
-開發端 (WSL)                          部署端 (<DEPLOY_HOST>)
-─────────────                         ───────────────────
-1. 改 static/js/main.js               
-2. 跑 ota_push.py push ...            
-   │
-   ├─ 讀 token (config/ota_token)     
-   ├─ POST /api/admin/ota  ────────►  3. ota.py 收到檔案
-   │   (multipart)                       ├─ 檢查 X-OTA-Token ✅
-   │                                    ├─ 檢查 target 在白名單 ✅
-   │                                    ├─ 備份原檔到 ota_backup/<ts>/
-   │                                    ├─ 寫 .tmp → os.replace ✅
-   │   ◄── {ok: true, size: 12345}      
-   │                                    
-   ├─ POST /api/admin/restart ─────►  4. ota.schedule_restart(2)
-   │   ({"delay_sec": 2})                ├─ 起一個 daemon thread
-   │   ◄── {ok: true}                    ├─ sleep 2 秒
-   │                                    └─ os._exit(0)  ← 主進程退出
-   │                                    
-   │                              ┌──► 5. ota_watchdog.bat 看到 exit code 0
-   │                              │     ├─ 視為「正常 OTA 重啟」
-   │                              │     ├─ 清掉 FAIL_COUNT
-   │                              │     ├─ timeout /t 3
-   │                              │     └─ goto LOOP
-   │                              │         └─ python app.py   ← 新 Flask 起來
-   │                              │             ├─ 載入新版 main.js
-   │                              │             └─ 廣播 socket 'version_changed'
-   │                              │
-   │   ◄── HTTP 200 (新 Flask 接手)    
-   │                                    
-6. 看到連線回 200 = 推送成功          
-7. Playwright 自動驗證圖表/主題/切站
-```
-
-關鍵設計點：
-- **OTA 自己不 spawn 新 Flask**：只讓主進程退出，由 watch dog 接手。  
-  否則 `python app.py` 會跟 `ota_watchdog.bat` 內的 `python app.py` 撞 port 5000，產生兩個 Flask 並存。
-- **exit code 區分崩潰 vs 正常重啟**：`os._exit(0)` = 正常 OTA 重啟（清 FAIL_COUNT），  
-  其他非零 = 崩潰（累計 FAIL_COUNT，5 次連敗才放手）。
-- **重啟期間前端不白屏**：socket 自動重連（Flask-SocketIO client 內建），5~8 秒後新版上線。
-
-### 18.6 寫入路徑白名單
-
-只有這些路徑可以被 OTA 覆蓋（其他路徑直接 400）：
-
-```
-前端
-  static/js/         static/css/        static/vendor/
-  templates/
-
-後端核心
-  app.py   config.py   storage.py   gx20_reader.py
-  lttb.py  run.py
-
-OTA 自己（不能改 ota.py 繞過自己的白名單檢查）
-  ota.py   ota_push.py
-  ota_watchdog.bat   start_forever.bat
-```
-
-新增可寫入檔 = 改 `ota.py` 的 `ALLOWED_TARGETS` 常數 → **必須透過 OTA 推新版 ota.py 才能加**。  
-（避免「OTA 模組自己允許自己寫入任意路徑」的循環漏洞。）
-
-### 18.7 Watch Dog 狀態機
-
-```
-            ┌─────────────────────────────────────────────┐
-            │ ota_watchdog.bat :LOOP                      │
-            └─────────────────────────────────────────────┘
-                          │
-                          ▼
-            ┌─────────────────────────────────────────────┐
-            │  python app.py                              │
-            │   ├─ 正常服務中（socket 推播、poller 跑）   │
-            │   ├─ 收到 /api/admin/restart                │
-            │   │    └─ 2 秒後 os._exit(0)                │
-            │   ├─ 收到 /api/admin/ota                   │
-            │   │    └─ atomic_write → 等下次重啟才生效   │
-            │   └─ 崩潰（未捕例外）                       │
-            │        └─ 立刻退出，exit code != 0          │
-            └─────────────────────────────────────────────┘
-                          │
-            ┌─────────────┴─────────────┐
-            │                           │
-       exit 0 (OTA)               exit != 0 (崩潰)
-            │                           │
-            ▼                           ▼
-   FAIL_COUNT ← 0           FAIL_COUNT += 1
-   timeout 3s                timeout 3s
-   goto LOOP                 若 ≥ 5 → pause 給人接手
-                             否則 goto LOOP
-```
-
-### 18.8 背景啟動（工廠現場）
-
-部署端不希望有人記得「手動跑 watch dog」 → 用 `start_forever.bat`：
-
-```cmd
-cd <DEPLOY_PATH>
-start_forever.bat
-```
-
-這個 bat 跑一行 `start "" /B /MIN cmd /c ota_watchdog.bat`：
-- `/B` = 在同 session 背景跑
-- `/MIN` = 縮到工作列
-- 父視窗關掉**不影響**子 cmd（這是 `start /B` 跟直接呼叫的差別）
-
-驗證三件事都看到才算活：
-
-```cmd
-netstat -ano | findstr :5000      ← Flask 在 listen
-tasklist | findstr python.exe     ← python 進程在跑
-type logs\watchdog.log            ← watch dog 有紀錄
-```
-
-### 18.8.1 開機自動啟動（背景啟動的延伸）
-
-工廠機台重啟後希望 GX20 自動起來、不需登入、不需人手動跑 → 用 Windows **工作排程器**呼叫 `start_forever.bat`。
-
-儲存於 repo：`setup_autostart.ps1`（位於 repo 根目錄，3,703 bytes）。
-
-**使用方式**（OTA 主機 PowerShell、需系統管理員權限）：
-
-```powershell
-cd D:\sampo\GX20-PW3335-Data-Collection
-powershell -ExecutionPolicy Bypass -File .\setup_autostart.ps1
-```
-
-**腳本會做的事**：
-1. 檢查 `start_forever.bat` 存在 + 確認管理員權限
-2. 若排程器已存在，問要不要覆蓋
-3. 建立 `GX20-WebMonitor` 工作排程器：
-   - 觸發：開機時（`AtStartup`）
-   - 執行：`D:\sampo\GX20-PW3335-Data-Collection\start_forever.bat`
-   - 使用者：`SYSTEM`（不需登入）
-   - 失敗重試 3 次、間隔 1 分鐘
-4. 印出驗證指令
-
-**完整啟動鏈**：
-
-```
-Windows 開機
-  ↓
-工作排程器觸發 GX20-WebMonitor
-  ↓
-start_forever.bat（PowerShell Start-Process -WindowStyle Hidden）
-  ↓
-ota_watchdog.bat（持續監看 Flask + 自動重啟）
-  ↓
-python app.py（Flask 服務）
-```
-
-**驗證**：
-
-```powershell
-# 看排程器狀態
-Get-ScheduledTask -TaskName "GX20-WebMonitor"
-
-# 立刻觸發（不等開機）
-Start-ScheduledTask -TaskName "GX20-WebMonitor"
-
-# 看 Flask 是否在 5000 port listen
-netstat -ano | findstr :5000
-
-# 看 watchdog log
-type D:\sampo\GX20-PW3335-Data-Collection\logs\watchdog.log
-```
-
-**移除**：
-
-```powershell
-Unregister-ScheduledTask -TaskName "GX20-WebMonitor" -Confirm:$false
-```
-
-**注意**：`setup_autostart.ps1` 不在 OTA 白名單內（`ALLOWED_TARGETS` 不含 `*.ps1`），不能 OTA push；要從 WSL 手動複製或從 GitHub raw URL 拉。
-
-### 18.9 故障排查對照表
-
-| 現象 | 看哪個 log | 可能原因 |
-|------|-----------|----------|
-| 推檔回 401 | — | Token 錯 / 兩端 token 指紋不一致 → `GET /api/admin/status` 對指紋 |
-| 推檔回 400 "target 不在白名單" | — | 想寫的路徑不在 `ALLOWED_TARGETS` → 改 `ota.py` 重推 |
-| 推檔回 500 "寫入失敗" | `logs/app.log` | 磁碟滿 / 權限不足 / 路徑含中文路徑問題 |
-| 重啟後 Flask 沒起來 | `logs/watchdog.log` | python 路徑找不到 / `app.py` 語法錯誤（已上線版本被改壞） |
-| Watch dog 連續 5 次退出 | `logs/watchdog.log` 看到 `[FATAL]` | `app.py` 進 startup 就崩潰；先手動跑 `python app.py` 看錯誤 |
-| 前端一直轉圈 | `logs/app.log` 的 socket 連線 | 可能是新版前端 JS 語法錯 → 從 `ota_backup` 還原 |
-| 上傳的檔內容跟本地不一樣 | — | `--target` 寫錯路徑，檔案落在白名單允許但位置不對的地方 |
-| Watch dog 跑兩份（port 5000 佔用） | `tasklist` 看到兩個 python | 之前 OTA 自己 spawn Flask 的舊 bug → 已修，v4.4 後不會發生 |
-
-### 18.10 跟 Web 版本控制的差別
-
-| 項目 | OTA（本系統） | Git + Pull | Docker 鏡像 |
-|------|--------------|-----------|-----------|
-| 部署端需要 git | 不需要 | 需要 | 不需要（看鏡像倉庫） |
-| 部署端需要 build | 不需要 | 看專案 | 需要（pull image） |
-| 部署端需要網路 | 只需能連開發端 | 只需能連 git remote | 需 registry |
-| 推送粒度 | 檔案級（單檔 / 批次） | commit 級 | image 級 |
-| 失敗回滾 | 自動備份在 `ota_backup/` | `git revert` + 拉 | 重新 pull 上一 tag |
-| 適用規模 | 1~3 台現場機 | 5+ 台 | 10+ 台 |
-| 本系統選 OTA 的原因 | 工廠機沒裝 git 也不能 build Python 套件 | — | — |
+於遠端以系統管理員 PowerShell 將排程 `\GX20_monitor` 指向 `D:\sampo\GX20-dist\gx20_monitor.exe`（工作目錄 `D:\sampo\GX20-dist`），即可在開機時自動啟動無 console 視窗的背景服務（設定腳本見 [docs/DEPLOY_SSH_NUITKA.md](docs/DEPLOY_SSH_NUITKA.md)）。
 
 ---
 
@@ -1626,7 +1387,6 @@ MEMORY.md 也記下了「使用者決策偏好」，供未來類似需求參考�
 
 ### 19d.2 對應本節驗證
 
-- 路由 / API 列表見 §12（**已補完** `/snapshot` 頁、`/api/pw_connection`、`/api/snapshot/*`、`/api/admin/clear_log`）
-- 改版重點見文檔頂部（**已加 v9**，標題已從「GX20 Web Monitor — 溫度監視網頁版」改為「GX20 + PW3335 Web Monitor — 溫度 × 電力監視」）
-- 開發端 → 部署端的 OTA 推送流程見 §18
-- Watch dog / OTA 重啟 SOP 見 CHANGELOG §5（v8 BOM hotfix）內含 2026-06-11 v4.4 的 watch dog 修正
+- 路由 / API 列表見 §12（含 `/snapshot` 頁、`/api/pw_connection`、`/api/snapshot/*`、`/api/note_box/<station>`；原 `/api/admin/*` 已於 v12.2 移除）
+- 改版重點見文檔頂部（標題為「GX20 + PW3335 Web Monitor — 溫度 × 電力監視」）
+- 開發端 → 部署端的 SSH + Nuitka 部署流程見 §18 與 [docs/DEPLOY_SSH_NUITKA.md](docs/DEPLOY_SSH_NUITKA.md)
